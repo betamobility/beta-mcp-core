@@ -1,0 +1,39 @@
+[project]
+name = "beta-mcp-core"
+version = "0.1.0"
+description = "Shared fail-closed MCP plumbing for Beta Mobility servers"
+requires-python = ">=3.12"
+dependencies = [
+    "asyncpg>=0.29,<1",
+    "cachetools>=5,<7",
+    "fastmcp>=3.1,<4",
+    "pydantic>=2,<3",
+    "pydantic-settings>=2.5,<3",
+    "starlette>=0.37,<1",
+    "structlog>=24,<26",
+    "uvicorn>=0.30,<1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27,<1",
+    "pytest>=8,<10",
+    "pytest-asyncio>=0.24,<2",
+    "ruff>=0.8,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["beta_mcp_core"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
