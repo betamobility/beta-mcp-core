@@ -17,7 +17,7 @@ remote MCP servers:
 Pin a released tag from member repos:
 
 ```text
-beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.1.0
+beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.1.1
 ```
 
 ## Remote Auth
@@ -35,4 +35,3 @@ configuration raises `SystemExit`; the server must not bind unauthenticated.
 
 Local stdio mode remains unauthenticated by design. The trust boundary is the
 operator's machine and MCP client process.
-

@@ -13,8 +13,23 @@ from beta_mcp_core.settings import McpBaseSettings
 class FakeMcp:
     def __init__(self):
         self.stdio_ran = False
+        self.http_kwargs: dict[str, object] | None = None
 
-    def http_app(self, *, transport: str, path: str):
+    def http_app(
+        self,
+        *,
+        transport: str,
+        path: str,
+        json_response: bool | None = None,
+        stateless_http: bool | None = None,
+    ):
+        self.http_kwargs = {
+            "transport": transport,
+            "path": path,
+            "json_response": json_response,
+            "stateless_http": stateless_http,
+        }
+
         async def ok(request):
             return JSONResponse({"transport": transport, "path": path})
 
@@ -46,6 +61,22 @@ def test_well_known_routes_present():
     assert response.json() == {"mcp_path": "/radar"}
 
 
+def test_http_options_pass_through():
+    mcp = FakeMcp()
+    build_asgi_app(
+        mcp,
+        mcp_path="/ssb",
+        json_response=True,
+        stateless_http=True,
+    )
+    assert mcp.http_kwargs == {
+        "transport": "streamable-http",
+        "path": "/ssb",
+        "json_response": True,
+        "stateless_http": True,
+    }
+
+
 def test_stdio_no_auth_required():
     mcp = FakeMcp()
     run(mcp, settings=McpBaseSettings(), remote=False)
@@ -55,4 +86,3 @@ def test_stdio_no_auth_required():
 def test_http_fails_closed_with_missing_credentials():
     with pytest.raises(SystemExit):
         run(FakeMcp(), settings=McpBaseSettings(), remote=True)
-
