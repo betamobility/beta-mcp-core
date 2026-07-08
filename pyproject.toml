@@ -1,6 +1,6 @@
 [project]
 name = "beta-mcp-core"
-version = "0.1.0"
+version = "0.1.1"
 description = "Shared fail-closed MCP plumbing for Beta Mobility servers"
 requires-python = ">=3.12"
 dependencies = [
@@ -36,4 +36,3 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-

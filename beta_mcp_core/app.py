@@ -24,13 +24,20 @@ def build_asgi_app(
     auth_provider=None,
     service_name: str = "mcp",
     extra_routes: Iterable = (),
+    json_response: bool | None = None,
+    stateless_http: bool | None = None,
 ) -> Starlette:
     """Build a Starlette app with `/health`, OAuth discovery, and MCP mount."""
 
     async def health(request):
         return JSONResponse({"status": "ok", "service": service_name})
 
-    mcp_app = mcp.http_app(transport="streamable-http", path=mcp_path)
+    mcp_app = mcp.http_app(
+        transport="streamable-http",
+        path=mcp_path,
+        json_response=json_response,
+        stateless_http=stateless_http,
+    )
     well_known_routes = (
         auth_provider.get_well_known_routes(mcp_path=mcp_path) if auth_provider else []
     )
@@ -80,4 +87,3 @@ def run(
     else:
         log.info("mcp_starting", mode="stdio", service=service_name)
         mcp.run(transport="stdio")
-
