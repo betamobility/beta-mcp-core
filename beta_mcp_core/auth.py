@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hmac
+import inspect
 
 import structlog
 from fastmcp.server.auth.providers.google import GoogleProvider
@@ -12,6 +13,7 @@ from mcp.server.auth.provider import AccessToken
 from beta_mcp_core.settings import McpBaseSettings
 
 ALLOWED_DOMAIN = "betamobility.io"
+SERVICE_TOKEN_ENV_VAR = "MCP_SERVICE_TOKEN"
 
 # MCP clients self-register via DCR. Restrict redirect targets to loopback
 # clients and Claude's hosted callback origins so a malicious registration
@@ -150,17 +152,19 @@ def build_auth_provider(
             "Generate with: openssl rand -hex 32."
         )
 
-    return DomainGuardGoogleProvider(
-        client_id=settings.google_client_id,
-        client_secret=settings.google_client_secret,
-        base_url=settings.mcp_base_url,
-        required_scopes=["openid", "https://www.googleapis.com/auth/userinfo.email"],
-        jwt_signing_key=settings.jwt_signing_key,
-        fastmcp_access_token_expiry_seconds=settings.token_expiry_seconds,
-        allowed_client_redirect_uris=ALLOWED_CLIENT_REDIRECT_URIS,
-        extra_authorize_params={"hd": settings.allowed_domain},
-        service_token=settings.mcp_service_token,
-        service_token_expires_at=settings.mcp_service_token_expires_at,
-        allowed_domain=settings.allowed_domain,
-    )
+    provider_kwargs = {
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "base_url": settings.mcp_base_url,
+        "required_scopes": ["openid", "https://www.googleapis.com/auth/userinfo.email"],
+        "jwt_signing_key": settings.jwt_signing_key,
+        "allowed_client_redirect_uris": ALLOWED_CLIENT_REDIRECT_URIS,
+        "extra_authorize_params": {"hd": settings.allowed_domain},
+        "service_token": settings.mcp_service_token,
+        "service_token_expires_at": settings.mcp_service_token_expires_at,
+        "allowed_domain": settings.allowed_domain,
+    }
+    if "fastmcp_access_token_expiry_seconds" in inspect.signature(GoogleProvider.__init__).parameters:
+        provider_kwargs["fastmcp_access_token_expiry_seconds"] = settings.token_expiry_seconds
 
+    return DomainGuardGoogleProvider(**provider_kwargs)

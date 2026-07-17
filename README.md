@@ -27,9 +27,14 @@ Remote HTTP mode must set all of:
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `JWT_SIGNING_KEY`
+- `MCP_SERVICE_TOKEN` for non-interactive internal MCP-to-MCP calls
 
 `JWT_SIGNING_KEY` must be at least 64 characters. Missing or partial remote auth
 configuration raises `SystemExit`; the server must not bind unauthenticated.
+
+`MCP_SERVICE_TOKEN` is the single Beta-wide bypass variable name. Compare it in
+constant time only, rotate it centrally, and treat it as equivalent to full
+tool access.
 
 ## Local Stdio
 
