@@ -35,3 +35,10 @@ configuration raises `SystemExit`; the server must not bind unauthenticated.
 
 Local stdio mode remains unauthenticated by design. The trust boundary is the
 operator's machine and MCP client process.
+
+## Deploy scaffold
+
+`scaffold/` holds the canonical Railway deploy artifacts — `docker-entrypoint.sh`
+(OAuth-state volume ownership + privilege drop) and `Dockerfile.template` — plus
+the three-stage rollout recipe and the DCR persistence probe. New remote servers
+start from there so connector authorizations survive deploys from day one.

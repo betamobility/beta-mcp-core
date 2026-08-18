@@ -1,0 +1,30 @@
+# Canonical Dockerfile for Beta MCP servers on Railway.
+# Copy into the member repo, replace the COPY lines and CMD with the
+# server's own layout, keep everything else.
+FROM python:3.12-slim
+
+# git only if requirements pull a git+https dependency (e.g. beta-mcp-core);
+# gosu is required by the entrypoint's privilege drop.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# --- server-specific payload ---
+COPY lib/ lib/
+COPY mcp_server.py .
+# -------------------------------
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN useradd --create-home --shell /usr/sbin/nologin appuser \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# No USER directive: the entrypoint stays root only long enough to chown the
+# mounted volume at FASTMCP_HOME (Railway mounts volumes root-owned), then
+# execs as appuser.
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["python", "mcp_server.py", "--remote"]
