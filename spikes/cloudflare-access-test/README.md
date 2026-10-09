@@ -30,15 +30,13 @@ The last row is the failure an Anthropic collaborator described in
 anthropics/claude-ai-mcp issue 478: it is the allowed-redirect list, and with Claude's
 callback on the list the registration succeeds.
 
-## What is not verified
+## The sign-in from Claude (2026-10-09)
 
-A sign-in from Claude and a tool call. That needs a person in a browser. Two results are
-wanted, each either "the tool answered with my email" or the reference id Claude shows:
-
-1. Claude's hosted connector (claude.ai, Settings, Connectors, add custom connector, the
-   address above, Connect, then ask Claude to "run whoami on beta-access-test").
-2. Claude Code: `claude mcp add --transport http beta-access-test https://mcp-access-test.betamobility.ai/mcp`,
-   then `/mcp` and authenticate.
+Done by the product owner through a custom connector in Claude. First attempt: Cloudflare's
+page "Invalid nonce. Please try logging in again." Second attempt, after removing the
+connector and closing leftover sign-in windows: connected, and `whoami` returned his
+`@betamobility.io` address with `identity_type: app`. Not tried: Claude Code, the mobile app,
+a second user.
 
 ## Removing it
 

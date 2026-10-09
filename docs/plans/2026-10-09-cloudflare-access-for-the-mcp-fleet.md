@@ -9,12 +9,14 @@ by hand. Nothing here has been built or tested by us.
 - Cloudflare Access can act as the OAuth authorization server for an MCP server ("managed
   OAuth"). The server then stops running its own Google sign-in and only checks a signed
   header from Cloudflare.
-- **Claude Code can sign in this way today, by several users' reports. Claude's hosted
-  connector (claude.ai web, desktop, mobile, Cowork) could not as of September 2026.** The
-  reports are open in Anthropic's own tracker and no fix is confirmed there.
-- So the fleet should not be moved yet. The first step is a one-server test that costs
-  little and settles the question. Until it passes, servers keep Google sign-in through
-  `beta-mcp-core`.
+- **Tested on 2026-10-09 and it works.** The product owner added our test server as a custom
+  connector in Claude, signed in through Access with Google, and a tool call reached the
+  server carrying a verified assertion for his `@betamobility.io` address. Users' reports in
+  Anthropic's tracker, as late as September 2026, said the hosted connector failed at this
+  point; it did not for us.
+- One test on one account is what this rests on. Claude Code, the mobile app and a second
+  user were not tried. The move can be planned; the first real server should be one nobody
+  else depends on.
 
 ## Can Claude's connector authenticate through Access?
 
@@ -60,8 +62,13 @@ Built: `spikes/cloudflare-access-test/`, live at `https://mcp-access-test.betamo
 Steps 1 and 2 are done and checked from the command line: the unauthenticated `401` carries
 the `WWW-Authenticate` header, discovery names Access as the authorization server, and a
 client registering with Claude's callback gets `201` where one with another redirect gets
-the refusal quoted in issue 478. Step 3, the sign-in from Claude and one tool call, is not
-done: it needs a person in a signed-in browser. Until it is, the question is still open.
+the refusal quoted in issue 478. Step 3 was done by the product owner the same day. The first attempt ended on a Cloudflare
+page saying "Invalid nonce. Please try logging in again."; after removing the connector,
+closing the leftover sign-in windows and connecting once more, the sign-in completed. The
+tool `whoami` then returned his email with `identity_type: app`, checked at 06:11:51 UTC.
+That is the pass condition below. Which Claude surface he used was not recorded. Cloudflare's
+login log was not read (the token in use has no log scope), so the cause of the first
+failure is not known; a sign-in started twice is the usual one.
 
 ## What changes per server, if the test passes
 
@@ -112,6 +119,7 @@ Consequences to weigh:
 
 ## Limits of this note
 
-No server was changed and no sign-in was attempted. The Claude documentation pages were
-seen through search summaries. The reports of failure are from users, dated June to
-September 2026; the state today is unknown until the test is run.
+No fleet server was changed. The result is one successful sign-in by one user on one
+Claude surface, after one failed attempt. The Claude documentation pages were seen through
+search summaries. Why users' reports from June to September 2026 differ from our result is
+not known: Anthropic may have fixed it, or their setups differed from ours.
