@@ -54,6 +54,15 @@ Pass: a tool call from claude.ai reaches the origin with a valid assertion for t
 `@betamobility.io` user. Fail: record the reference id Claude shows and stop; the fleet stays
 on Google sign-in and the test is repeated when issue 980 closes.
 
+### State of the test, 2026-10-09
+
+Built: `spikes/cloudflare-access-test/`, live at `https://mcp-access-test.betamobility.ai/mcp`.
+Steps 1 and 2 are done and checked from the command line: the unauthenticated `401` carries
+the `WWW-Authenticate` header, discovery names Access as the authorization server, and a
+client registering with Claude's callback gets `201` where one with another redirect gets
+the refusal quoted in issue 478. Step 3, the sign-in from Claude and one tool call, is not
+done: it needs a person in a signed-in browser. Until it is, the question is still open.
+
 ## What changes per server, if the test passes
 
 | Step | What | Who |

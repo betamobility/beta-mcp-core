@@ -1,0 +1,18 @@
+name = "beta-access-test"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+preview_urls = false
+
+[[routes]]
+pattern = "mcp-access-test.betamobility.ai"
+custom_domain = true
+
+[observability]
+enabled = true
+
+# Public values: the Zero Trust team domain and the audience tag of the Access application.
+[vars]
+ACCESS_TEAM_DOMAIN = "round-smoke-5856.cloudflareaccess.com"
+ACCESS_AUD = "56f3e696990eab6b5953e2c3ad31c6ecab70d6e9620908d29c5138a5bf289cf1"
+ALLOWED_DOMAIN = "betamobility.io"
