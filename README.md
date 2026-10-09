@@ -17,7 +17,7 @@ remote MCP servers:
 Pin a released tag from member repos:
 
 ```text
-beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.1.1
+beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.2.0
 ```
 
 ## Remote Auth
