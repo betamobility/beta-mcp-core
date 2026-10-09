@@ -14,5 +14,5 @@ enabled = true
 # Public values: the Zero Trust team domain and the audience tag of the Access application.
 [vars]
 ACCESS_TEAM_DOMAIN = "round-smoke-5856.cloudflareaccess.com"
-ACCESS_AUD = "placeholder-until-the-access-application-exists"
+ACCESS_AUD = "56f3e696990eab6b5953e2c3ad31c6ecab70d6e9620908d29c5138a5bf289cf1"
 ALLOWED_DOMAIN = "betamobility.io"
