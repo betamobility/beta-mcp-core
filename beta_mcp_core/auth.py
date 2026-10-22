@@ -129,7 +129,7 @@ def build_auth_provider(
 ) -> DomainGuardGoogleProvider | None:
     """Build the remote auth provider, refusing to boot on unsafe config."""
 
-    if not remote:
+    if not remote or settings.access_enabled:
         return None
 
     required = {
