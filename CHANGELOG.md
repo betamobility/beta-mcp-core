@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0
+
+- Add fail-closed Cloudflare Access middleware with bounded JWKS refresh,
+  exact human-domain checks, explicit machine identity allowlist and caller state.
+- Configure Access with one audience, mutually exclusive with Google OAuth and
+  legacy bearer credentials; Access HTTP is stateless.
+- Add a non-root container scaffold without OAuth volumes or signing keys.
+- Require fastmcp>=3.4.11,<4. Existing Google mode remains supported.
+
 ## v0.2.0
 
 - Lift the `starlette<1` cap: the package now requires `starlette>=1.0.1,<2`. Starlette

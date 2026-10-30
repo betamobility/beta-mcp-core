@@ -14,15 +14,16 @@ remote MCP servers:
 
 ## Install
 
-Pin a released tag from member repos:
+Access mode is released as v0.3.0. Resolve the release to a commit SHA and pin
+that SHA in member repositories; the tag below identifies the release:
 
 ```text
-beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.2.0
+beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.3.0
 ```
 
 ## Remote Auth
 
-Remote HTTP mode must set all of:
+Google-mode remote HTTP must set all of:
 
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
@@ -36,9 +37,22 @@ configuration raises `SystemExit`; the server must not bind unauthenticated.
 Local stdio mode remains unauthenticated by design. The trust boundary is the
 operator's machine and MCP client process.
 
+## Access mode
+
+Set `CF_ACCESS_TEAM_DOMAIN` and one `CF_ACCESS_AUD`, with no Google trio or
+legacy MCP_SERVICE_TOKEN. `CF_ACCESS_SERVICE_TOKENS` is a JSON array of allowed
+service-token client IDs (`common_name`), not secret values. It defaults empty.
+Use `build_auth_provider(settings)` when constructing FastMCP (returns None in
+Access mode); pass `settings=settings` to `build_asgi_app`, or use `run`.
+The app helper also loads these environment settings when settings is omitted.
+
+Requests validate the Access assertion independently of Authorization. Verified
+human email must match the allowed domain; machine identities must be listed.
+`get_caller()` reads verified request state. No OAuth metadata or bearer-token
+provider is installed in Access mode. Stateless HTTP is mandatory.
+
 ## Deploy scaffold
 
-`scaffold/` holds the canonical Railway deploy artifacts — `docker-entrypoint.sh`
-(OAuth-state volume ownership + privilege drop) and `Dockerfile.template` — plus
-the three-stage rollout recipe and the DCR persistence probe. New remote servers
-start from there so connector authorizations survive deploys from day one.
+`scaffold/` contains the non-root, volume-free Access-mode container template.
+Google-mode containers keep their existing OAuth persistence configuration until
+cutover. See `docs/access-verification.md` for test evidence and live gates.

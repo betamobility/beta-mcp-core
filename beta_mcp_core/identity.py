@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import getpass
 
-from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.dependencies import get_access_token, get_http_request
 
 
 def get_caller(*, local_prefix: str = "local") -> str:
     """Return the verified FastMCP caller, with a local stdio fallback."""
+
+    try:
+        identity = getattr(get_http_request().state, "access_identity", None)
+        if identity is not None:
+            return identity.actor_id
+    except RuntimeError:
+        pass
 
     try:
         token = get_access_token()

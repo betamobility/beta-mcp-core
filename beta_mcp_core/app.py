@@ -8,9 +8,11 @@ from collections.abc import Iterable
 
 import structlog
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from beta_mcp_core.access import AccessConfig, AccessMiddleware, AccessVerifier
 from beta_mcp_core.auth import build_auth_provider
 from beta_mcp_core.settings import McpBaseSettings
 
@@ -22,6 +24,7 @@ def build_asgi_app(
     *,
     mcp_path: str = "/mcp",
     auth_provider=None,
+    settings: McpBaseSettings | None = None,
     service_name: str = "mcp",
     extra_routes: Iterable = (),
     json_response: bool | None = None,
@@ -32,7 +35,23 @@ def build_asgi_app(
     async def health(request):
         return JSONResponse({"status": "ok", "service": service_name})
 
+    settings = settings or McpBaseSettings()
+    middleware = []
+    if settings.access_enabled:
+        if auth_provider is not None or getattr(mcp, "auth", None) is not None:
+            raise ValueError("Access mode cannot run with a FastMCP auth provider")
+        if stateless_http is False:
+            raise ValueError("Access mode requires stateless_http=True")
+        stateless_http = True
+        middleware = [Middleware(
+            AccessMiddleware,
+            verifier=AccessVerifier(AccessConfig(settings.cf_access_team_domain, settings.cf_access_aud)),
+            allowed_domain=settings.allowed_domain,
+            service_tokens=settings.cf_access_service_tokens,
+        )]
+
     mcp_app = mcp.http_app(
+        **({"middleware": middleware} if middleware else {}),
         transport="streamable-http",
         path=mcp_path,
         json_response=json_response,
@@ -43,6 +62,7 @@ def build_asgi_app(
     )
 
     return Starlette(
+        middleware=middleware,
         routes=[
             Route("/health", health),
             *well_known_routes,
@@ -79,6 +99,7 @@ def run(
             mcp,
             mcp_path=mcp_path,
             auth_provider=auth_provider,
+            settings=settings,
             service_name=service_name,
         )
         port = int(os.environ.get("PORT", settings.port))
