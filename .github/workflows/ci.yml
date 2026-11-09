@@ -28,3 +28,9 @@ jobs:
       - name: Test
         run: uv run pytest
 
+
+      - name: Test on the FastMCP 3 lower bound
+        run: uv run --with "fastmcp==3.4.11" pytest
+
+      - name: Test on FastMCP 4.1.2 (scout's pin)
+        run: uv run --with "fastmcp==4.1.2" pytest

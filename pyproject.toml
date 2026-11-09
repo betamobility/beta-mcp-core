@@ -1,6 +1,6 @@
 [project]
 name = "beta-mcp-core"
-version = "0.3.0"
+version = "0.4.0"
 description = "Shared fail-closed MCP plumbing for Beta Mobility servers"
 requires-python = ">=3.12"
 dependencies = [
@@ -8,7 +8,7 @@ dependencies = [
     "pyjwt[crypto]>=2.10,<3",
     "asyncpg>=0.29,<1",
     "cachetools>=5,<7",
-    "fastmcp>=3.4.11,<4",
+    "fastmcp>=3.4.11,<5",
     "pydantic>=2,<3",
     "pydantic-settings>=2.5,<3",
     "starlette>=1.0.1,<2",

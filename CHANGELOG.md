@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.0
+
+- Widen the FastMCP requirement to `fastmcp>=3.4.11,<5`. No change to the package's own
+  code or API: Access mode, Google mode and the ASGI scaffold work unchanged on FastMCP 4.
+- The lock resolves fastmcp 4.1.6; CI also runs the full suite on fastmcp 3.4.11 (lower
+  bound) and 4.1.2, so both majors stay supported.
+
 ## v0.3.0
 
 - Add fail-closed Cloudflare Access middleware with bounded JWKS refresh,
