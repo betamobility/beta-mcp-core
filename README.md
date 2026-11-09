@@ -14,11 +14,19 @@ remote MCP servers:
 
 ## Install
 
-Access mode is released as v0.3.0. Resolve the release to a commit SHA and pin
-that SHA in member repositories; the tag below identifies the release:
+Access mode was released in v0.3.0; v0.4.0 supports FastMCP 3.4.11 and later 3.x
+as well as FastMCP 4. Resolve the release to a commit SHA and pin that SHA in member
+repositories; the tag below identifies the release:
 
 ```text
-beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.3.0
+beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.4.0
+```
+
+A member repo that installs with `pip --require-hashes` cannot hash a git requirement.
+Pin the commit's archive URL instead, which `uv pip compile --generate-hashes` can hash:
+
+```text
+beta-mcp-core @ https://github.com/betamobility/beta-mcp-core/archive/<sha>.tar.gz
 ```
 
 ## Remote Auth
