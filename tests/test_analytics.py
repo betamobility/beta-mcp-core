@@ -28,14 +28,15 @@ def setup(handler, **kwargs):
     return server, analytics, sender
 
 
-async def test_real_calls_emit_once_and_list_emits_nothing():
+@pytest.mark.parametrize("trusted", [False, True])
+async def test_real_calls_emit_once_and_list_emits_nothing(trusted):
     requests = []
 
     def receive(request):
         requests.append(request)
         return httpx.Response(200, json={"status": "ok", "plausible": "ok"})
 
-    server, analytics, sender = setup(receive)
+    server, analytics, sender = setup(receive, trust_cloudflare_client_ip=trusted)
     async with sender, Client(server) as client:
         await client.list_tools()
         await analytics.drain()
@@ -51,6 +52,7 @@ async def test_real_calls_emit_once_and_list_emits_nothing():
         assert request.headers["authorization"] == "Bearer private-token"
         assert request.headers["user-agent"] == "beta-mcp-core/analytics"
         assert "x-forwarded-for" not in request.headers
+        assert "x-beta-visitor-ip" not in request.headers
         assert payload["site_id"] == "betamobility.ai"
         assert payload["url"] == "https://betamobility.ai/mcp/test-mcp"
         assert payload["event_name"] == "tool_call"
@@ -148,3 +150,68 @@ def test_duration_boundaries(elapsed, expected):
     from beta_mcp_core.analytics import _duration_band
 
     assert _duration_band(elapsed) == expected
+
+
+@pytest.mark.parametrize("trusted, visitor, expected_ip", [
+    (True, "8.8.8.8", "8.8.8.8"),
+    (True, "2606:4700:4700::1111", "2606:4700:4700::1111"),
+    (False, "8.8.8.8", None),
+    (True, "8.8.8.8, 1.1.1.1", None),
+    (True, "invalid", None),
+    (True, "duplicate", None),
+    (True, "224.0.0.1", None),
+    (True, "127.0.0.1", None),
+    (True, "10.0.0.1", None),
+    (True, "169.254.1.1", None),
+    (True, "", None),
+    (True, "fc00::1", None),
+    (True, "2606:4700:4700::1111%eth0", None),
+])
+async def test_http_tool_attribution_is_transport_only(trusted, visitor, expected_ip):
+    requests = []
+
+    def receive(request):
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok", "plausible": "ok"})
+
+    server, analytics, sender = setup(receive, trust_cloudflare_client_ip=trusted)
+    app = server.http_app(stateless_http=True, json_response=True)
+    inbound = {
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "actual-mcp-client/1.0",
+        "CF-Connecting-IP": visitor,
+        "X-Forwarded-For": "1.1.1.1",
+        "Authorization": "Bearer incoming-private",
+        "Cookie": "private=session",
+        "CF-Access-Client-Secret": "private-edge-secret",
+    }
+    if visitor == "duplicate":
+        inbound["CF-Connecting-IP"] = "8.8.8.8"
+        inbound = list(inbound.items()) + [("CF-Connecting-IP", "1.1.1.1")]
+    async with app.router.lifespan_context(app), sender:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="https://mcp.example",
+            headers=inbound,
+        ) as client:
+            for i, (method, params) in enumerate([
+                ("tools/list", {}),
+                ("tools/call", {"name": "echo", "arguments": {"secret": "private-input"}}),
+                ("tools/call", {"name": "fail", "arguments": {"secret": "private-error"}}),
+            ]):
+                response = await client.post("/mcp", json={
+                    "jsonrpc": "2.0", "id": i, "method": method, "params": params,
+                })
+                assert response.status_code == 200, response.text
+            await analytics.drain()
+    assert len(requests) == 2
+    assert [json.loads(r.content)["outcome"] for r in requests] == ["success", "error"]
+    for request in requests:
+        assert request.headers["user-agent"] == "actual-mcp-client/1.0"
+        assert request.headers.get("x-beta-visitor-ip") == expected_ip
+        assert request.headers["authorization"] == "Bearer private-token"
+        assert "cookie" not in request.headers
+        assert "cf-access-client-secret" not in request.headers
+        assert "x-forwarded-for" not in request.headers
+        assert "actual-mcp-client" not in request.content.decode()
+        assert "8.8.8.8" not in request.content.decode()
+        assert "private" not in request.content.decode()

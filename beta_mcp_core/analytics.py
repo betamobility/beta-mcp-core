@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from ipaddress import ip_address
 import re
 import time
 from urllib.parse import urlsplit
 
 import httpx
 from fastmcp.server.middleware import Middleware
+from fastmcp.server.dependencies import get_http_request
 
 logger = logging.getLogger(__name__)
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,120}\Z")
@@ -41,8 +43,10 @@ class ToolAnalyticsMiddleware(Middleware):
         enabled: bool = False,
         environment: str = "development",
         max_pending: int = 64,
+        trust_cloudflare_client_ip: bool = False,
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        self._trust_cloudflare_client_ip = trust_cloudflare_client_ip
         self._component_id = component_id
         self._url = ingest_url
         self._token = ingest_token
@@ -81,6 +85,7 @@ class ToolAnalyticsMiddleware(Middleware):
             registered = False
         if not registered:
             return await call_next(context)
+        attribution = self._request_attribution()
         started = time.monotonic()
         outcome = "error"
         try:
@@ -91,9 +96,33 @@ class ToolAnalyticsMiddleware(Middleware):
             )
             return result
         finally:
-            self._enqueue(name, outcome, time.monotonic() - started)
+            self._enqueue(name, outcome, time.monotonic() - started, attribution)
 
-    def _enqueue(self, tool: str, outcome: str, elapsed: float) -> None:
+    def _request_attribution(self) -> dict[str, str]:
+        headers = {"User-Agent": "beta-mcp-core/analytics"}
+        try:
+            request = get_http_request()
+        except RuntimeError:
+            return headers
+        user_agent = request.headers.get("user-agent")
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        if self._trust_cloudflare_client_ip:
+            # Only trust this header when the deployment verifies the Cloudflare
+            # edge and prevents callers from reaching the origin directly.
+            values = request.headers.getlist("cf-connecting-ip")
+            if len(values) == 1:
+                try:
+                    address = ip_address(values[0])
+                    if address.is_global and not address.is_multicast and "%" not in values[0]:
+                        headers["X-Beta-Visitor-IP"] = str(address)
+                except ValueError:
+                    pass
+        return headers
+
+    def _enqueue(
+        self, tool: str, outcome: str, elapsed: float, attribution: dict[str, str],
+    ) -> None:
         if len(self._pending) >= self._max_pending:
             logger.warning("analytics delivery failed: queue full")
             return
@@ -108,30 +137,32 @@ class ToolAnalyticsMiddleware(Middleware):
             "forward_to_plausible": True,
             "props": {"tool": tool, "duration_band": _duration_band(elapsed)},
         }
-        task = asyncio.create_task(self._send(payload))
+        task = asyncio.create_task(self._send(payload, attribution))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
 
-    async def _send(self, payload: dict) -> None:
+    async def _send(self, payload: dict, attribution: dict[str, str]) -> None:
         try:
             # The explicit overall deadline also bounds custom injected clients.
             async with asyncio.timeout(10):
                 if self._client is not None:
-                    await self._post(self._client, payload)
+                    await self._post(self._client, payload, attribution)
                 else:
                     async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
-                        await self._post(client, payload)
+                        await self._post(client, payload, attribution)
         except Exception:
             # No response body, URL, token, arguments, or exception text in logs.
             logger.warning("analytics delivery failed: request did not complete")
 
-    async def _post(self, client: httpx.AsyncClient, payload: dict) -> None:
+    async def _post(
+        self, client: httpx.AsyncClient, payload: dict, attribution: dict[str, str],
+    ) -> None:
         response = await client.post(
             self._url,
             json=payload,
             headers={
                 "Authorization": f"Bearer {self._token}",
-                "User-Agent": "beta-mcp-core/analytics",
+                **attribution,
             },
             follow_redirects=False,
         )

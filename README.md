@@ -90,7 +90,7 @@ await analytics.drain()
 Each completed call records one `tool_call` outcome (`success` or `error`) with
 its registered tool name and duration band (`lt_1s`, `1_5s`, `5_30s`, `gte_30s`).
 Arguments, results, caller identities, error text, and visitor IPs are never
-included. Mission Control receives events first, targeting `betamobility.ai`
+included in event JSON. Mission Control receives events first, targeting `betamobility.ai`
 with the synthetic URL `https://betamobility.ai/mcp/<component_id>`.
 
 Missing production configuration disables analytics with a warning, without
@@ -103,3 +103,19 @@ transport failures log sanitized warnings and never change tool results.
 Call `drain()` before closing any injected HTTP client at shutdown. Production
 verification must confirm accepted forwarding and the component's actual
 Plausible event receipt; a healthy service or HTTP 200 alone is insufficient.
+
+For HTTP calls, the middleware forwards the actual inbound User-Agent as a
+transport header. Set `trust_cloudflare_client_ip=True` only in deployments
+whose Cloudflare Access boundary is verified and whose origin cannot be reached
+by callers bypassing that boundary. This setting forwards a single valid public
+`CF-Connecting-IP` to Mission Control as `X-Beta-Visitor-IP`. It defaults to false;
+invalid, private, repeated, or comma-separated addresses are ignored. There is
+no `X-Forwarded-For` fallback. These headers are not stored in event JSON or
+logged by this middleware; inbound cookies, authorization, and Access credentials
+are never copied. Mission Control must preserve that transport-only treatment.
+
+Without an HTTP request (including stdio), events retain the truthful
+`beta-mcp-core/analytics` User-Agent and carry no visitor IP. Cloud and stdio
+traffic may be filtered by Plausible and cannot guarantee distinct user counts.
+A dropped receipt remains a delivery failure; never fabricate a browser or
+visitor IP to bypass filtering.
