@@ -64,3 +64,42 @@ provider is installed in Access mode. Stateless HTTP is mandatory.
 `scaffold/` contains the non-root, volume-free Access-mode container template.
 Google-mode containers keep their existing OAuth persistence configuration until
 cutover. See `docs/access-verification.md` for test evidence and live gates.
+
+## Tool analytics
+
+`ToolAnalyticsMiddleware` is opt-in and runs at FastMCP's tool boundary for both
+HTTP and stdio. Register it **once** on the server, replacing any HTTP request
+analytics middleware. Listing tools, health checks, and unknown tool names do
+not generate tool-use events.
+
+```python
+from beta_mcp_core.analytics import ToolAnalyticsMiddleware
+
+analytics = ToolAnalyticsMiddleware(
+    component_id="ssb-mcp",  # fixed registered app identifier
+    ingest_url=settings.mc_analytics_url,  # HTTPS /analytics/event endpoint
+    ingest_token=settings.mc_analytics_token,
+    enabled=settings.analytics_enabled,
+    environment=settings.environment,  # must explicitly be "production"
+)
+mcp.add_middleware(analytics)
+# In the server lifespan's shutdown, after stopping new tool calls:
+await analytics.drain()
+```
+
+Each completed call records one `tool_call` outcome (`success` or `error`) with
+its registered tool name and duration band (`lt_1s`, `1_5s`, `5_30s`, `gte_30s`).
+Arguments, results, caller identities, error text, and visitor IPs are never
+included. Mission Control receives events first, targeting `betamobility.ai`
+with the synthetic URL `https://betamobility.ai/mcp/<component_id>`.
+
+Missing production configuration disables analytics with a warning, without
+breaking tools. Pending deliveries are capped at 64 by default; a full queue
+logs an explicit delivery failure. Each send has a ten-second deadline and no
+retry, so an uncertain receipt cannot duplicate the event. A successful HTTP
+response counts as delivered only when Mission Control returns both
+`status: "ok"` and `plausible: "ok"`. Dropped events, failed forwarding, and
+transport failures log sanitized warnings and never change tool results.
+Call `drain()` before closing any injected HTTP client at shutdown. Production
+verification must confirm accepted forwarding and the component's actual
+Plausible event receipt; a healthy service or HTTP 200 alone is insufficient.
