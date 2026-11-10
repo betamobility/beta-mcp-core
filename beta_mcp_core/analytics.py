@@ -44,9 +44,11 @@ class ToolAnalyticsMiddleware(Middleware):
         environment: str = "development",
         max_pending: int = 64,
         trust_cloudflare_client_ip: bool = False,
+        error_result_key: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._trust_cloudflare_client_ip = trust_cloudflare_client_ip
+        self._error_result_key = error_result_key
         self._component_id = component_id
         self._url = ingest_url
         self._token = ingest_token
@@ -89,8 +91,15 @@ class ToolAnalyticsMiddleware(Middleware):
         outcome = "error"
         try:
             result = await call_next(context)
+            structured = getattr(result, "structured_content", None)
+            domain_error = (
+                self._error_result_key is not None
+                and isinstance(structured, dict)
+                and bool(structured.get(self._error_result_key))
+            )
             outcome = (
-                "error" if getattr(result, "is_error", False) or getattr(result, "isError", False)
+                "error" if domain_error or getattr(result, "is_error", False)
+                or getattr(result, "isError", False)
                 else "success"
             )
             return result

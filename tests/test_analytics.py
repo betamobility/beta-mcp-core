@@ -152,6 +152,34 @@ def test_duration_boundaries(elapsed, expected):
     assert _duration_band(elapsed) == expected
 
 
+@pytest.mark.parametrize("error_key, marker, expected", [
+    ("error", "private failure", "error"),
+    ("error", None, "success"),
+    (None, "private failure", "success"),
+])
+async def test_opt_in_domain_error_preserves_result(error_key, marker, expected):
+    payloads = []
+
+    def receive(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"status": "ok", "plausible": "ok"})
+
+    server, analytics, sender = setup(receive, error_result_key=error_key)
+
+    @server.tool
+    def domain_result() -> dict:
+        return {"error": marker, "detail": "private customer data"}
+
+    async with sender, Client(server) as client:
+        result = await client.call_tool("domain_result")
+        assert result.data == {"error": marker, "detail": "private customer data"}
+        assert not result.is_error
+        await analytics.drain()
+    assert len(payloads) == 1
+    assert payloads[0]["outcome"] == expected
+    assert "private" not in json.dumps(payloads)
+
+
 @pytest.mark.parametrize("trusted, visitor, expected_ip", [
     (True, "8.8.8.8", "8.8.8.8"),
     (True, "2606:4700:4700::1111", "2606:4700:4700::1111"),

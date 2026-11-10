@@ -93,6 +93,12 @@ Arguments, results, caller identities, error text, and visitor IPs are never
 included in event JSON. Mission Control receives events first, targeting `betamobility.ai`
 with the synthetic URL `https://betamobility.ai/mcp/<component_id>`.
 
+Protocol errors and raised exceptions count as errors. For servers whose
+existing result contract returns a top-level `error` field inside a normal
+structured response, set `error_result_key="error"`. A truthy value counts as
+an error without changing the tool response or including that value in analytics.
+Leave this unset when an `error` field is ordinary data rather than a failure.
+
 Missing production configuration disables analytics with a warning, without
 breaking tools. Pending deliveries are capped at 64 by default; a full queue
 logs an explicit delivery failure. Each send has a ten-second deadline and no
