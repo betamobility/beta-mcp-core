@@ -73,7 +73,6 @@ class ToolAnalyticsMiddleware(Middleware):
         if not self._enabled:
             return await call_next(context)
         name = context.message.name
-        # Never send an arbitrary client-supplied string as a tool identifier.
         try:
             registered = (
                 _IDENTIFIER.fullmatch(name)
@@ -143,7 +142,6 @@ class ToolAnalyticsMiddleware(Middleware):
 
     async def _send(self, payload: dict, attribution: dict[str, str]) -> None:
         try:
-            # The explicit overall deadline also bounds custom injected clients.
             async with asyncio.timeout(10):
                 if self._client is not None:
                     await self._post(self._client, payload, attribution)
@@ -151,7 +149,6 @@ class ToolAnalyticsMiddleware(Middleware):
                     async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
                         await self._post(client, payload, attribution)
         except Exception:
-            # No response body, URL, token, arguments, or exception text in logs.
             logger.warning("analytics delivery failed: request did not complete")
 
     async def _post(
