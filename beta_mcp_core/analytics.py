@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from typing import Any
 import logging
 from ipaddress import ip_address
 import re
@@ -46,10 +48,12 @@ class ToolAnalyticsMiddleware(Middleware):
         max_pending: int = 64,
         trust_cloudflare_client_ip: bool = False,
         error_result_key: str | None = None,
+        error_result_predicate: Callable[[str, Any], bool] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._trust_cloudflare_client_ip = trust_cloudflare_client_ip
         self._error_result_key = error_result_key
+        self._error_result_predicate = error_result_predicate
         self._component_id = component_id
         self._url = ingest_url
         self._token = ingest_token
@@ -101,6 +105,13 @@ class ToolAnalyticsMiddleware(Middleware):
                 and isinstance(structured, dict)
                 and bool(structured.get(self._error_result_key))
             )
+            if self._error_result_predicate is not None and not domain_error:
+                try:
+                    domain_error = bool(self._error_result_predicate(name, structured))
+                except Exception:
+                    logger.warning("analytics skipped: outcome classification failed")
+                    outcome = None
+                    return result
             outcome = (
                 "error" if domain_error or getattr(result, "is_error", False)
                 or getattr(result, "isError", False)
@@ -108,7 +119,8 @@ class ToolAnalyticsMiddleware(Middleware):
             )
             return result
         finally:
-            self._enqueue(name, outcome, time.monotonic() - started, attribution)
+            if outcome is not None:
+                self._enqueue(name, outcome, time.monotonic() - started, attribution)
 
     def _request_attribution(self) -> dict[str, str]:
         headers = {"User-Agent": "beta-mcp-core/analytics"}
