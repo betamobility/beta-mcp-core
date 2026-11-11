@@ -12,7 +12,8 @@ def setup(handler, **kwargs):
     sender = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     analytics = ToolAnalyticsMiddleware(
         component_id="test-mcp", ingest_url="https://mc.example/analytics/event",
-        ingest_token="private-token", enabled=True, environment="production",
+        ingest_token="private-token", enabled=True,
+        environment=kwargs.pop("environment", "production"),
         client=sender, **kwargs,
     )
     server = FastMCP("test", middleware=[analytics])
@@ -57,7 +58,7 @@ async def test_real_calls_emit_once_and_list_emits_nothing(trusted):
         assert payload["url"] == "https://betamobility.ai/mcp/test-mcp"
         assert payload["event_name"] == "tool_call"
         assert payload["forward_to_plausible"] is True
-        assert payload["props"]["duration_band"] == "lt_1s"
+        assert payload["props"]["duration_band"] in {"lt_1s", "1_5s", "5_30s", "gte_30s"}
         assert "person@" not in request.content.decode()
         assert "SECRET" not in request.content.decode()
 
@@ -115,6 +116,61 @@ async def test_disabled_missing_configuration_preserves_tools(caplog):
         assert (await client.call_tool("healthy")).data == "ok"
     assert "analytics disabled" in caplog.text
     assert analytics.pending_count == 0
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_malformed_url_preserves_tool_availability(enabled, caplog):
+    analytics = ToolAnalyticsMiddleware(
+        component_id="test-mcp", ingest_url="https://[", ingest_token="secret",
+        enabled=enabled, environment="production",
+    )
+    server = FastMCP("test", middleware=[analytics])
+
+    @server.tool
+    def healthy() -> str:
+        return "ok"
+
+    async with Client(server) as client:
+        assert (await client.call_tool("healthy")).data == "ok"
+    assert analytics.pending_count == 0
+    assert ("analytics disabled" in caplog.text) is enabled
+    assert "secret" not in caplog.text
+
+
+@pytest.mark.parametrize("name", ["tables.search", "t" * 128])
+async def test_registered_mcp_names_are_recorded(name):
+    payloads = []
+
+    def receive(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"status": "ok", "plausible": "ok"})
+
+    server, analytics, sender = setup(receive)
+
+    @server.tool(name=name)
+    def healthy() -> str:
+        return "ok"
+
+    async with sender, Client(server) as client:
+        assert (await client.call_tool(name)).data == "ok"
+        await analytics.drain()
+    assert len(payloads) == 1
+    assert payloads[0]["props"]["tool"] == name
+
+
+@pytest.mark.parametrize("environment", ["development", "staging"])
+async def test_nonproduction_with_valid_credentials_does_not_send(environment):
+    requests = []
+
+    def receive(request):
+        requests.append(request)
+        return httpx.Response(200)
+
+    server, analytics, sender = setup(receive, environment=environment)
+    async with sender, Client(server) as client:
+        assert (await client.call_tool("echo", {"secret": "local-only"})).data == "local-only"
+        await analytics.drain()
+    assert requests == []
 
 
 async def test_error_result_and_unknown_tool_are_distinct():

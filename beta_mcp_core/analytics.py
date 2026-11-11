@@ -15,6 +15,7 @@ from fastmcp.server.dependencies import get_http_request
 
 logger = logging.getLogger(__name__)
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,120}\Z")
+_TOOL_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
 
 
 def _duration_band(seconds: float) -> str:
@@ -55,15 +56,18 @@ class ToolAnalyticsMiddleware(Middleware):
         self._client = client
         self._pending: set[asyncio.Task] = set()
         self._max_pending = max_pending
-        target = urlsplit(ingest_url)
-        self._enabled = bool(
-            enabled and environment == "production" and ingest_token
-            and _IDENTIFIER.fullmatch(component_id)
-            and target.scheme == "https" and target.hostname
-            and not target.username and not target.password
-            and not target.query and not target.fragment
-            and max_pending > 0
-        )
+        try:
+            target = urlsplit(ingest_url)
+            self._enabled = bool(
+                enabled and environment == "production" and ingest_token
+                and _IDENTIFIER.fullmatch(component_id)
+                and target.scheme == "https" and target.hostname
+                and not target.username and not target.password
+                and not target.query and not target.fragment
+                and max_pending > 0
+            )
+        except ValueError:
+            self._enabled = False
         if enabled and not self._enabled:
             logger.warning("analytics disabled: incomplete production configuration")
 
@@ -77,7 +81,7 @@ class ToolAnalyticsMiddleware(Middleware):
         name = context.message.name
         try:
             registered = (
-                _IDENTIFIER.fullmatch(name)
+                _TOOL_NAME.fullmatch(name)
                 and context.fastmcp_context is not None
                 and await context.fastmcp_context.fastmcp.get_tool(name) is not None
             )
