@@ -95,8 +95,8 @@ class JWKSCache:
             return key
 
         refresh_key = config.team_domain
-        last_refresh = self._unknown_refreshes.get(refresh_key, 0.0)
-        if now - last_refresh < 30:
+        last_refresh = self._unknown_refreshes.get(refresh_key)
+        if last_refresh is not None and now - last_refresh < 30:
             raise AccessAuthError("Access assertion denied")
         self._unknown_refreshes[refresh_key] = now
         cached = await self._refresh(config, force=True)

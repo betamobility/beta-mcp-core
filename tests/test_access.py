@@ -86,7 +86,11 @@ def test_unknown_key_and_wrong_signature_denied(keys):
 
 
 @pytest.mark.asyncio
-async def test_rotated_key_refreshes_once(keys):
+async def test_rotated_key_refreshes_once(keys, monkeypatch):
+    import asyncio
+
+    # A freshly booted runner can have a monotonic clock below 30 seconds.
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: 5.0)
     reads = []
     def fetch(request):
         reads.append(request.url)
