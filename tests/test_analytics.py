@@ -299,3 +299,47 @@ async def test_http_tool_attribution_is_transport_only(trusted, visitor, expecte
         assert "actual-mcp-client" not in request.content.decode()
         assert "8.8.8.8" not in request.content.decode()
         assert "private" not in request.content.decode()
+
+
+@pytest.mark.parametrize("failed", [False, True])
+async def test_custom_domain_error_classifier_preserves_list_results(failed):
+    payloads = []
+    def receive(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"status": "ok", "plausible": "ok"})
+    def classify(name, structured):
+        rows = structured.get("result", [])
+        return name == "search" and len(rows) == 1 and bool(rows[0].get("error"))
+    server, analytics, sender = setup(receive, error_result_predicate=classify)
+    rows = [{"error": "private failure"}] if failed else [{"title": "private result"}]
+    @server.tool
+    def search() -> list[dict]:
+        return rows
+    @server.tool
+    def ordinary_data() -> list[dict]:
+        return [{"error": "private ordinary value"}]
+    async with sender, Client(server) as client:
+        result = await client.call_tool("search")
+        assert result.data == rows
+        assert not result.is_error
+        await client.call_tool("ordinary_data")
+        await analytics.drain()
+    assert [p["outcome"] for p in payloads] == ["error" if failed else "success", "success"]
+    assert "private" not in json.dumps(payloads)
+
+
+async def test_classifier_failure_does_not_change_tool_result(caplog):
+    payloads = []
+    def receive(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"status": "ok", "plausible": "ok"})
+    def classify(name, structured):
+        raise ValueError("private classifier details")
+    server, analytics, sender = setup(receive, error_result_predicate=classify)
+    async with sender, Client(server) as client:
+        result = await client.call_tool("echo", {"secret": "private result"})
+        assert result.data == "private result"
+        await analytics.drain()
+    assert payloads == []
+    assert "analytics skipped: outcome classification failed" in caplog.text
+    assert "private" not in caplog.text

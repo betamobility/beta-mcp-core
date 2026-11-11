@@ -98,6 +98,11 @@ existing result contract returns a top-level `error` field inside a normal
 structured response, set `error_result_key="error"`. A truthy value counts as
 an error without changing the tool response or including that value in analytics.
 Leave this unset when an `error` field is ordinary data rather than a failure.
+For a different legacy result envelope, supply `error_result_predicate(tool_name,
+structured_content) -> bool`, scoped to the tools whose contracts define that
+failure shape. It runs locally; only the boolean affects the event. If the
+classifier raises, analytics logs a sanitized warning and skips that event
+without changing the tool result.
 
 Missing production configuration disables analytics with a warning, without
 breaking tools. Pending deliveries are capped at 64 by default; a full queue
