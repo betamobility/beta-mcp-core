@@ -1,6 +1,6 @@
 [project]
 name = "beta-mcp-core"
-version = "0.4.0"
+version = "0.5.0"
 description = "Shared fail-closed MCP plumbing for Beta Mobility servers"
 requires-python = ">=3.12"
 dependencies = [

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.0
+
+- One MCP path for the fleet. `build_asgi_app(..., legacy_paths=["/folio"])` keeps old
+  paths working as aliases of `mcp_path` (default `/mcp`), and the trailing-slash form of
+  every path is accepted without a redirect. Before this, `/<path>/` answered 307 to an
+  `http://` URL behind Cloud Run, which MCP clients cannot follow. Servers that build
+  their own app wrap it with `normalize_mcp_paths(app, mcp_path=..., legacy_paths=...)`.
+  The rewrite runs outermost, so Access still checks every alias.
+- The Beta icon and website in the MCP handshake. `build_asgi_app` sets them where the
+  server set none (`branding=False` turns it off); `apply_beta_branding(mcp)` does the
+  same for a server that builds its own app.
+
 ## v0.4.0
 
 - Widen the FastMCP requirement to `fastmcp>=3.4.11,<5`. No change to the package's own
