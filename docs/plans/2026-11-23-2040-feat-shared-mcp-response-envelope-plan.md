@@ -11,7 +11,7 @@ execution: code
 
 ## Goal Capsule
 
-- **Objective:** Anyone at Beta who asks a question through the public statistics MCP servers (ssb, dst, scb, destatis, uk-stats) gets an answer that says where every figure came from and when it was retrieved, whether it came from cache, what was cut and why, and which tool to call next. The same answer shape holds on all five servers and spends fewer tokens than today.
+- **Objective:** Anyone at Beta who asks a question through the public statistics MCP servers (ssb, dst, scb, destatis, uk-stats) gets an answer that says where every figure came from and when it was retrieved, whether it came from cache, what was cut and why, and which tool to call next. The same answer shape holds on all five servers. No answer exceeds a fixed token cap, and no server's tool list grows.
 - **Means:** a versioned, additive envelope module in `beta-mcp-core` (KTD1, KTD2), adopted server by server, plus small fixes in `beta-infra`, Mission Control, `beta-plans` and the handbook.
 - **Authority:** this plan's Product Contract governs behaviour. KTDs govern mechanism. Each target repo's own AGENTS.md or CLAUDE.md governs branch flow, test commands and deploy. Where they disagree with this plan, the repo wins and the plan is corrected.
 - **Stop conditions:** stop and report if any of these happens:
@@ -19,6 +19,7 @@ execution: code
   - Mission Control rejects a test event carrying the new analytics props after its deploy (U1);
   - the `beta-infra` terraform plan for U11 shows a delete or replace;
   - a paid model API call becomes necessary (see Open Questions).
+  - a server would enable the new analytics props before Mission Control accepts them in production (U1).
 - **Execution profile:** several PRs, one per target repository, because each repository merges and deploys on its own. They are grouped in Implementation Units, and each group has a `Waits on:` line.
 - **Finishes and ships:** the implementing agent opens, merges and deploy-verifies each PR. A deploy counts as done only when the serving revision's `git-sha` label equals the merged commit and one real tool call returns the new envelope.
 - **Target repos:** `beta-mcp-core` (home of this plan), `Mission Control`, `ssb-mcp`, `dst-mcp`, `scb-mcp`, `destatis-mcp`, `uk-stats-mcp`, `beta-plans`, `handbook`, `beta-infra`. File paths in each unit are relative to that unit's named repo.
@@ -33,7 +34,7 @@ Add a shared response envelope to `beta-mcp-core`, released as v0.6.0. It carrie
 
 ### Problem Frame
 
-The TRY Innsyn due diligence (`try-innsyn-dd`, `vault/laering/mcp-estatet.md`) compared Beta's MCP estate with a competitor that packages 400 tools behind one consistent answer shape. Beta's servers are smaller and better at reproducibility, but each one shapes its answers differently. The statistics servers return errors as plain strings with no code, and none of them names a licence or a retrieval time. Truncation is a bool in some servers, a dict in `beta-plans` and absent in uk-stats. Cache hits are invisible, so a stale figure looks fresh. A model reading these answers has to learn five dialects. It cannot tell a figure fetched now from one cached six hours ago, and it has to work out changes and shares itself, where it sometimes gets them wrong.
+The TRY Innsyn due diligence (`try-innsyn-dd`, `vault/laering/mcp-estatet.md`) compared Beta's MCP estate with a competitor that packages 400 tools behind one consistent answer shape. Beta's servers are smaller and better at reproducibility, but each one shapes its answers differently. ssb, dst, scb and destatis return errors as plain strings with no code. None of the five names a licence, and only uk-stats already names a retrieval time. Truncation is a bool in some servers, a dict in `beta-plans` and absent in uk-stats. Cache hits are invisible, so a stale figure looks fresh. A model reading these answers has to learn five dialects. It cannot tell a figure fetched now from one cached six hours ago, and it has to work out changes and shares itself, where it sometimes gets them wrong.
 
 The estate also has drifted plumbing:
 - `beta-mcp-core` pins range from v0.1.1 to v0.5.0, in at least five syntaxes, so core fixes do not reach the servers that need them.
@@ -69,7 +70,7 @@ The DD notes on PR #1 of `try-innsyn-dd` overstated three gaps: a rate limit alr
 **Cache and analytics**
 
 - R10. A cached answer says so, with the time its data was fetched.
-- R11. Statistics metadata survives a cold start.
+- R11. Metadata for ssb, dst, scb and destatis survives a cold start. uk-stats keeps its existing `PublicHttp` cache.
 - R12. Tool analytics in Mission Control show cache hits and upstream latency bands per tool, with no content, place or filter.
 
 **Skills, catalogue and use cases**
@@ -89,7 +90,7 @@ The DD notes on PR #1 of `try-innsyn-dd` overstated three gaps: a rate limit alr
 - AE2. Covers R3, R10. Given the same `ssb_data` call twice within the cache TTL, when the second answer arrives, then `sources[0].cached` is true and `fetched_at` equals the first call's time.
 - AE3. Covers R5. Given a dst call that would produce 40,000 estimated tokens, when it answers, then the answer is under the cap, `truncated` is true as before, and `truncation` lists the rows cut and a `how_to_continue` hint.
 - AE4. Covers R8. Given an SSB series with periods 2023 and 2024, when `ssb_data` answers, then `derived` holds the absolute and percentage change from 2023 to 2024 for each series.
-- AE5. Covers R12. Given an upgraded server is deployed before Mission Control accepts the new props, when a tool is called, then analytics events are not silently lost (U1 lands first and U2 refuses to emit unknown props).
+- AE5. Covers R12. Given an upgraded server is deployed before Mission Control accepts the new props, when a tool is called, then analytics events are not silently lost (U1 is deployed first, and a server emits the new props only after it opts in, so a server deployed earlier still sends `{tool, duration_band}`).
 
 ### Success Criteria
 
@@ -125,28 +126,48 @@ The DD notes on PR #1 of `try-innsyn-dd` overstated three gaps: a rate limit alr
   - `error` keeps its current type on every server: a string in ssb, dst, scb and destatis, an object in uk-stats. A new top-level `error_code` is added on every failure.
   - `truncated` keeps its current bool where it exists, and the new `truncation` object carries `{reason, cut, how_to_continue}`. uk-stats keeps `pagination` and gets `truncation` only when a size cut happens.
   - uk-stats keeps `warnings`. Envelope-level notes go in `reading_notes` and are not copied into `warnings`.
-  - The two readings never disagree. Whenever `truncation` is present, a legacy `truncated` bool is true. Whenever `error_code` is present, `error` is present and truthy. `assert_valid_envelope` checks both.
+  - The two readings never disagree. Whenever `truncation` is present on a server that already carries a legacy `truncated` bool, that bool is true. uk-stats is not made to add one. Whenever `error_code` is present, `error` is present and truthy. `assert_valid_envelope` checks the bool only where the key exists.
   - Conflict call-out: this leaves two ways to read an error and a truncation on the same answer. A later major version may drop the legacy fields once no caller reads them. That is out of scope here.
 - KTD3. **Token cap of 20,000 estimated tokens, estimated as characters divided by three, as in `beta-plans`.** The estimate is deliberately cautious for Nordic JSON and stays under Claude Code's ~25k `MAX_MCP_OUTPUT_TOKENS` (`claude-config` `docs/rules/mcp-patterns.md`). Servers may lower the cap per tool and may not raise it.
-- KTD4. **Closed error code list in core.** The list starts as the union of the codes already used in `beta-plans` and uk-stats, plus `upstream_error`, `upstream_rate_limited` and `upstream_empty`:
-  - from `beta-plans` and uk-stats: `invalid_request`, `invalid_identifier`, `invalid_cursor`, `invalid_pagination`, `not_found`, `query_too_large`, `source_changed`, `timeout`, `internal_error`;
-  - new: `upstream_error`, `upstream_rate_limited` and `upstream_empty`, for the silent-failure cases in `claude-config` `docs/solutions/integration-issues/statistics-apis-fail-silently.md`.
+- KTD4. **Closed error code list in core, covering every code the migrated servers raise today.**
+  - The list holds the generic codes from `beta-plans` `ERROR_CODES` and every distinct code uk-stats raises on origin/main (`StatsError` in `lib/` and `mcp_server.py`). That includes `upstream_pagination`, `invalid_query`, `invalid_input`, `invalid_limit`, `invalid_sheet`, `schema_changed` and `upstream_schema`, as well as the ones shared with `beta-plans`.
+  - It adds `upstream_error`, `upstream_rate_limited` and `upstream_empty`, for the silent-failure cases in `claude-config` `docs/solutions/integration-issues/statistics-apis-fail-silently.md`.
+  - `beta-plans`' place and passage codes stay in `beta-plans`.
+  - The implementer derives the exact uk-stats set from the code. A U2 test fails when any code uk-stats can raise is missing.
+  - Building an error with an unknown code raises in tests. In production it maps to `internal_error` and keeps the original text in `message`, so a failure path never turns into a crash.
+  - Adding a code is a core minor release.
+- KTD5. **Cache stamps through a core `stamped_cache`.**
+  - It wraps `ttl_cache`, stores `(fetched_at, value)`, returns a deep copy, and reports hit or miss.
+  - The deep copy avoids the shared-dict mutation hazard in the current per-server caches, including `fit()` cutting rows in place on a cached value.
+  - Cache state goes in the JSON body, never only in headers, because Cloudflare strips cache headers on compressed responses (`claude-config` `docs/solutions/integration-issues/cloudflare-edge-strips-strong-etag-on-compressed-responses.md`).
+  - An empty or error body is never cached.
+- KTD6. **Analytics extension through a per-call holder, not tool code changes.**
+  - `ToolAnalyticsMiddleware` creates a mutable holder before calling the tool and sets it in a context variable.
+  - `stamped_cache` and a core `upstream_timer` write into that holder. A sync tool run in a worker thread still reaches the same object.
+  - At the end of `on_call_tool`, the middleware adds two banded props:
+    - `cache` = `hit`, `miss` or `none`;
+    - `upstream_band` = the existing duration bands.
 
-  An unknown code raises at build time. Adding a code is a core minor release.
-- KTD5. **Cache stamps through a core `stamped_cache`.** It wraps `ttl_cache`, stores `(fetched_at, value)`, returns a copy, and reports hit or miss. Returning a copy avoids the shared-dict mutation hazard in the current per-server caches. Cache state goes in the JSON body, never only in headers, because Cloudflare strips cache headers on compressed responses (`claude-config` `docs/solutions/integration-issues/cloudflare-edge-strips-strong-etag-on-compressed-responses.md`). An empty or error body is never cached.
-- KTD6. **Analytics extension through a context variable, not tool code changes.** `stamped_cache` and a core `upstream_timer` record into a per-call context variable. `ToolAnalyticsMiddleware` reads it at the end of `on_call_tool` and adds two banded props:
-  - `cache` = `hit`, `miss` or `none`;
-  - `upstream_band` = the existing duration bands.
-
-  Bands, not raw milliseconds, keep the props low-cardinality and content-free. The middleware emits the new props only when the server opts in, so a v0.6.0 server deployed before U1 sends today's props.
-- KTD7. **Derived figures are computed only from the rows returned, on the server.** `derived` is an object keyed by series. Each series gets the previous-to-latest change (absolute and percent) when there are at least two periods and both values are numeric. When a category set includes the total, each series also gets its share of the latest period. Suppressed or noisy values (SCB `..`, noise from 2025) yield no derived figure and add a reading note instead. When rows were cut by `max_rows` or `fit()`, shares are not computed, because the denominator may be incomplete. Changes are computed only for series whose two periods are both present.
-- KTD8. **Shared metadata cache in a GCS bucket.** The statistics servers have no database, and `beta-infra` already has a cache bucket pattern (`terraform/prod/cache_buckets.tf`). Only metadata and codelists are written there, keyed by source, table and language, and read through to memory. If the bucket variable is unset, the server falls back to memory only. Four rules apply:
-  - Blobs keep the original `fetched_at`.
-  - Empty or error bodies are never written.
-  - A bucket read failure counts as a miss, never an error to the caller.
-  - Keys carry a schema version, so a format change starts a new prefix instead of misreading old blobs.
-
-  U3, U4, U5 and U6 deploy safely before U13, running memory-only until the variable appears.
+  Bands, not raw milliseconds, keep the props low-cardinality and content-free. The middleware emits the new props only when the server opts in. A server opts in only after U1 is deployed (Goal Capsule stop condition), so a v0.6.0 server without the opt-in sends today's props.
+- KTD7. **Derived figures are computed on the server, from the full parsed rows, before `fit()`.**
+  - The time dimension and any total category come from the source's own metadata: the PxWeb time variable and the elimination or total value code, and in uk-stats the dataset's time dimension. Labels are never guessed.
+  - `derived` is an object keyed by series. A series gets the change from the previous to the latest period only when the two periods are adjacent in the source's own period list and both values are numeric.
+  - The change is absolute and percent for counts and amounts. For rates, shares, averages and indices, it is in percentage points or units, never percent.
+  - A series gets its share of the latest period only for additive counts or amounts, and only when the total category is present.
+  - Suppressed or noisy values (SCB `..`, noise from 2025) yield no derived figure and add a reading note instead.
+  - When upstream rows were cut by `max_rows` before parsing, shares are not computed, because the denominator may be incomplete.
+  - `fit()` runs after `derived` exists. A size cut that removes rows does not change the derived figures already computed from the full rows.
+- KTD8. **Shared metadata cache in a GCS bucket, as an optional backend of `stamped_cache` in core.**
+  - The statistics servers have no database, and `beta-infra` already has a cache bucket pattern (`terraform/prod/cache_buckets.tf`).
+  - The backend lives in `beta_mcp_core/cache.py`, with the storage client as an optional dependency extra, so the four servers share one implementation.
+  - Only metadata and codelists are written there, keyed by source, table and language, and read through to memory. If the bucket variable is unset, the server falls back to memory only.
+  - Five rules apply:
+    - A blob is valid only while its age, measured from `fetched_at`, is under the in-memory metadata TTL (24 hours today). Older blobs count as a miss and are refetched and rewritten. The 30-day lifecycle in U13 is garbage collection only.
+    - Blobs keep the original `fetched_at`.
+    - Empty or error bodies are never written.
+    - A bucket read failure counts as a miss, never an error to the caller.
+    - Keys carry a schema version, so a format change starts a new prefix instead of misreading old blobs.
+  - U3, U4, U5 and U6 deploy safely before U13, running memory-only until the variable appears.
 - KTD9. **Core-version check by git ancestry.** Pins are written as tags, SHAs, tarball URLs and `[tool.uv.sources]` revs, and SHA `b87cbfa` sits on a side branch not contained in v0.5.0. The check resolves each pin to a core commit and fails when the release tag one minor below the latest is not an ancestor of that commit. It runs weekly in `beta-infra` against the repos named in `terraform/prod/services.auto.tfvars.json`, and reports through a GitHub issue that it updates rather than duplicates.
 - KTD10. **The catalogue and use-case library run real tool calls, with no model in the loop.** Each scenario is a fixed tool call with arguments and simple checks on the answer. Runs are dated and pinned to the server's `build`, corpus or edition where it has one. This keeps the library free to run and repeatable.
 
@@ -178,7 +199,8 @@ PR order across repos:
 
 ```mermaid
 flowchart TB
-  MC[PR1 Mission Control allowlist, deployed] --> CORE[PR2 beta-mcp-core v0.6.0 tagged]
+  MC[PR1 Mission Control allowlist, deployed]
+  CORE[PR2 beta-mcp-core v0.6.0 tagged]
   CORE --> SSB[PR3 ssb-mcp]
   CORE --> DST[PR4 dst-mcp]
   CORE --> SCB[PR5 scb-mcp]
@@ -186,6 +208,12 @@ flowchart TB
   CORE --> UK[PR7 uk-stats-mcp]
   INFRA[PR10 beta-infra] -. bucket env, optional .-> SSB
   SSB --> CAT[PR9 handbook catalogue + use cases]
+  DST --> CAT
+  SCB --> CAT
+  DES --> CAT
+  UK --> CAT
+  INFRA -. U11 flags .-> CAT
+  MC -. deployed before opt-in .-> SSB
   PLANS[PR8 beta-plans skill]
 ```
 
@@ -217,7 +245,7 @@ None beyond the KTDs. The bets this plan makes are stated there with their reaso
 | U6 | destatis-mcp onto the envelope | destatis-mcp `mcp_server.py`, `lib/*`, CI | U2 |
 | U7 | uk-stats-mcp onto the envelope | uk-stats-mcp `lib/service.py`, `lib/http.py` | U2 |
 | U8 | Skills: plans new, stats updated | beta-plans `skills/plans/`, ssb/dst/scb `skills/*` | U3-U5 for stats parts |
-| U9 | Tool catalogue and use-case library | handbook `scripts/mcp_catalogue/`, `catalogue/` | U3-U7 |
+| U9 | Tool catalogue and use-case library | handbook `scripts/mcp_catalogue/`, `catalogue/` | U3-U7, U11 |
 | U10 | PKCE check | beta-infra `docs/access-adoption.md`, `scripts/` | none |
 | U11 | `mcp` flags and their test | beta-infra `terraform/hostnames.yaml`, `tests/` | none |
 | U12 | Core-version check | beta-infra `.github/workflows/`, `scripts/core_pins.py` | U2 tagged |
@@ -246,21 +274,21 @@ Waits on: nothing.
 
 ### PR2: beta-mcp-core v0.6.0
 
-Waits on: PR1, deployed. Core may emit the new props only after Mission Control accepts them. The reason for a separate PR is a different repository.
+Waits on: nothing. Core's new props are off until a server opts in (KTD6), so core can merge before Mission Control. The reason for a separate PR is a different repository.
 
 ### U2. Envelope module, stamped cache, analytics extension, contract helper
 
 - **Goal:** core offers everything R1 to R6, R10 and R12 need, released and tagged as v0.6.0.
 - **Requirements:** R1, R2, R4, R5, R6, R10, R12; KTD1, KTD3, KTD4, KTD5, KTD6.
-- **Dependencies:** U1 deployed.
+- **Dependencies:** none.
 - **Files:**
   - create `beta_mcp_core/envelope.py`, `beta_mcp_core/testing.py`, `tests/test_envelope.py`, `tests/test_testing_helper.py`;
   - modify `beta_mcp_core/cache.py`, `beta_mcp_core/analytics.py`, `beta_mcp_core/__init__.py`, `tests/test_cache.py`, `tests/test_analytics.py`, `CHANGELOG.md`, `pyproject.toml`, `README.md` (install line still says v0.4.0).
 - **Approach:**
   1. In `envelope.py`, add builders for a source record, reading notes, truncation and a coded error (KTD2, KTD4), plus `fit()` and `estimate_tokens()` lifted from `beta-plans` (KTD1, KTD3).
-  2. In `cache.py`, add `stamped_cache` beside the existing `ttl_cache`, leaving `ttl_cache` unchanged (KTD5).
-  3. Add `upstream_timer` and the per-call context variable. Teach `ToolAnalyticsMiddleware` an opt-in flag for the two new props (KTD6).
-  4. In `testing.py`, add `assert_valid_envelope(result)` and `assert_tool_surface(server, snapshot_path)`, modelled on `beta-plans` `tests/mcp/test_tools_contract.py`. Servers import these, so the contract has one code path.
+  2. In `cache.py`, add `stamped_cache` beside the existing `ttl_cache`, leaving `ttl_cache` unchanged, plus the optional GCS read-through backend behind a dependency extra (KTD5, KTD8).
+  3. Add `upstream_timer` and the per-call holder. Teach `ToolAnalyticsMiddleware` an opt-in flag for the two new props (KTD6).
+  4. In `testing.py`, add `assert_valid_envelope(result, baseline=None)` and `assert_tool_surface(server, snapshot_path)`, modelled on `beta-plans` `tests/mcp/test_tools_contract.py`. With a baseline, `assert_valid_envelope` fails when any key in a recorded pre-migration answer is missing or has changed type. Servers import these, so the contract has one code path.
   5. Bump to 0.6.0, write the changelog, and tag after merge.
 - **Execution note:** write `tests/test_envelope.py` first from AE1 to AE3. The envelope is a shared contract, and its tests are the spec servers will run.
 - **Patterns to follow:** `beta-plans` `beta_plans/mcp/envelope.py` and `tests/mcp/test_paging.py`.
@@ -273,9 +301,15 @@ Waits on: PR1, deployed. Core may emit the new props only after Mission Control 
   - `stamped_cache` reports `miss` then `hit`, with the same `fetched_at` on both.
   - An empty or error value is not stored.
   - The middleware with the opt-in off sends exactly `{tool, duration_band}`, as today.
-  - The middleware with the opt-in on sends `cache` and `upstream_band` from the context variable, and `none` when the tool used no cache.
+  - The middleware with the opt-in on sends `cache` and `upstream_band` from the per-call holder, and `none` when the tool used no cache.
+  - A sync tool function run in a worker thread that hits the cache still produces `cache=hit`.
+  - Running `fit()` on a cache hit and then hitting again returns the full rows.
+  - Every code uk-stats raises on origin/main is in `ERROR_CODES`, checked against a list taken from its source.
+  - An unknown code raises under test settings and maps to `internal_error`, with the original text kept, under production settings.
+  - The GCS backend treats an expired blob, a read failure and a missing blob as misses, never writes an empty value, and keeps the original `fetched_at`.
   - Context from one call does not leak into the next concurrent call.
   - `assert_valid_envelope` fails on a missing `fetched_at` in a source, and passes on a valid answer.
+  - With a baseline, it fails when a key from the baseline is gone or its type changed, for example `error` turning from a string into an object.
   - The whole suite passes on fastmcp 3.4.11 and 4.1.2 (the existing CI matrix).
 - **Verification:** CI is green on both fastmcp versions, tag `v0.6.0` exists, and the CHANGELOG lists every new public name.
 
@@ -286,7 +320,7 @@ Waits on: PR2, needed before this group can start, because the build installs co
 ### U3. ssb-mcp onto the envelope
 
 - **Goal:** every ssb tool returns the envelope, the derived figures, hints and the shared metadata cache.
-- **Requirements:** R2 to R11; KTD2, KTD5, KTD7, KTD8; AE1, AE2, AE4.
+- **Requirements:** R2 to R12; KTD2, KTD5, KTD6, KTD7, KTD8; AE1, AE2, AE4.
 - **Dependencies:** U2.
 - **Files:**
   - modify `mcp_server.py`, `lib/cache.py`, `lib/ssb_client.py`, `lib/parser.py`, `requirements.txt`, `skills/ssb-api/SKILL.md`, `.github/workflows/ci.yml`;
@@ -298,6 +332,8 @@ Waits on: PR2, needed before this group can start, because the build installs co
   4. Map HTTP 400 "Too many cells" to `query_too_large`. Today's code reads it as 403, which is the bug from `statistics-apis-fail-silently.md`.
   5. End descriptions with the next tool to call (R9).
   6. Make CI run on pushes to `main` as well as PRs. Today it runs only on PRs and a feature branch, so the contract test would never guard `main`.
+  7. Before changing any tool, record each tool's current answers from the unmodified code as baseline files. These are not upstream fixtures. They include `truncated`, `total_rows` and the `error` string.
+  8. After U1 is deployed, enable the analytics opt-in and wrap upstream calls in `upstream_timer` (R12).
 - **Patterns to follow:** uk-stats `lib/http.py` for a fetch that carries its retrieval time.
 - **Test scenarios:**
   - Covers AE1. A fixture with HTTP 400 "Too many cells" gives the same `error` string as before and `error_code` `query_too_large`.
@@ -307,9 +343,10 @@ Waits on: PR2, needed before this group can start, because the build installs co
   - A series with a missing value in the latest period gets no derived figure for that series only.
   - An empty upstream body gives `upstream_empty` and is not cached.
   - `assert_valid_envelope` passes for every tool, run against the offline fixtures with network calls failing.
+  - `assert_valid_envelope` with the recorded baseline passes for every tool, so no existing key is gone or retyped.
   - The existing analytics test still passes (`error` stays truthy).
   - `tools/list` character count is no larger than the recorded pre-migration count.
-- **Verification:** after deploy, one real `ssb_data` call through `ssb.betamobility.ai` (or the host in `hostnames.yaml`) returns `sources` with `fetched_at`, and Mission Control shows a `cache` prop for `ssb-mcp`.
+- **Verification:** after deploy, two identical real `ssb_data` calls through the host in `hostnames.yaml` return `sources` with `fetched_at`. Mission Control then shows one `ssb-mcp` event with `cache=miss` and one with `cache=hit`.
 
 ### PR4: dst-mcp
 
@@ -318,7 +355,7 @@ Waits on: PR2, needed before this group can start. The reason for a separate PR 
 ### U4. dst-mcp onto the envelope
 
 - **Goal:** as U3, for dst.
-- **Requirements:** R2 to R11; KTD2, KTD5, KTD7, KTD8; AE3.
+- **Requirements:** R2 to R12; KTD2, KTD5, KTD6, KTD7, KTD8; AE3.
 - **Dependencies:** U2.
 - **Files:** modify `mcp_server.py`, `lib/cache.py`, `lib/dst_client.py`, `lib/parser.py`, `requirements.txt`, `skills/dst-api/SKILL.md`; create `tests/test_envelope_contract.py`, `tests/test_derived.py`, fixtures.
 - **Approach:** as U3, with these deltas:
@@ -339,7 +376,7 @@ Waits on: PR2, needed before this group can start. The reason for a separate PR 
 ### U5. scb-mcp onto the envelope
 
 - **Goal:** as U3, for scb.
-- **Requirements:** R2 to R11; KTD2, KTD5, KTD7, KTD8.
+- **Requirements:** R2 to R12; KTD2, KTD5, KTD6, KTD7, KTD8.
 - **Dependencies:** U2.
 - **Files:** modify `mcp_server.py`, `lib/cache.py` (raw `cachetools.TTLCache` today), `lib/scb_client.py`, `lib/parser.py`, `requirements.txt` (pins `fastmcp==3.4.11`), `skills/scb-api/SKILL.md`; create the contract and derived tests and fixtures.
 - **Approach:** as U3, with these deltas:
@@ -360,17 +397,17 @@ Waits on: PR2, needed before this group can start. The reason for a separate PR 
 ### U6. destatis-mcp onto the envelope, with a test CI
 
 - **Goal:** as U3, for destatis, plus a CI workflow that runs its tests.
-- **Requirements:** R2 to R7, R9 to R11; KTD2, KTD5, KTD8. R8 applies where destatis returns a time series.
+- **Requirements:** R2 to R7, R9 to R12; KTD2, KTD5, KTD6, KTD8. R8 applies where destatis returns a time series.
 - **Dependencies:** U2.
 - **Files:** modify `mcp_server.py`, `lib/cache.py`, `lib/destatis_client.py`, `requirements.txt`; create `.github/workflows/ci.yml`, `tests/test_envelope_contract.py`, fixtures.
 - **Approach:**
   1. Apply U3's changes.
   2. Map "No data returned" to `upstream_empty`, and guest-mode refusals to `invalid_request` with a hint that the server has no login.
   3. Add a CI workflow. Destatis has none today, so the contract test would never run.
-  4. Add a test that scans error answers for the configured username, password or token, because destatis sends credentials in headers.
+  4. Add a test that scans the full serialized answer of every tool for the configured username, password or token, on success and on error. The scan covers `sources[].url`, `reading_notes`, `truncation` and the object written to the metadata bucket, because destatis sends credentials in headers. Source URLs are built from the request path without credential parameters.
 - **Patterns to follow:** dst-mcp `.github/workflows/ci.yml`.
 - **Test scenarios:**
-  - An error answer never contains the configured `DESTATIS_USERNAME` or password, checked with sentinel values.
+  - No answer, success or error, and no bucket object ever contains the configured `DESTATIS_USERNAME` or password, checked with sentinel values.
   - A guest-mode refusal carries `invalid_request` and the hint.
   - The Zensus missing-Content-Length fixture parses, and the answer carries its source.
   - Same cache and contract scenarios as U3.
@@ -383,14 +420,15 @@ Waits on: PR2, needed before this group can start. The reason for a separate PR 
 ### U7. uk-stats-mcp onto the envelope
 
 - **Goal:** uk-stats adds `sources`, `error_code`, `truncation`, the cache flag and derived figures without changing `provenance`, `warnings`, `pagination` or its `error` object.
-- **Requirements:** R2 to R10; KTD2, KTD5, KTD7.
+- **Requirements:** R2 to R10, R12; KTD2, KTD4, KTD5, KTD6, KTD7.
 - **Dependencies:** U2.
 - **Files:** modify `lib/service.py`, `lib/http.py`, `lib/models.py`, `mcp_server.py`, `pyproject.toml`, `uv.lock`; create `tests/test_envelope_contract.py`; extend `tests/test_mcp.py`.
 - **Approach:**
   1. Build `sources` from the existing `provenance` (`source_url`, `retrieved_at`).
   2. Add `cached` from `PublicHttp`, which already knows hits.
   3. Add `error_code` mirroring `error.code`, and fold uk-stats' open code set into the core list. A uk-stats code missing from the core list is a core change, made in U2 before this unit.
-  4. Do not use the shared metadata cache. uk-stats metadata comes through `PublicHttp`'s byte-budgeted cache, which is out of scope.
+  4. Record baseline answers from the unmodified code first, as U3 does, covering `provenance`, `warnings`, `pagination` and the `error` object.
+  5. Do not use the shared metadata cache. uk-stats metadata comes through `PublicHttp`'s byte-budgeted cache, which is out of scope.
 - **Patterns to follow:** its own `invoke` wrapper.
 - **Test scenarios:**
   - A structured error keeps `error: {code, message}` and `is_error`, and adds a matching `error_code`.
@@ -418,19 +456,19 @@ Waits on: nothing. The reason for a separate PR is a different repository.
 
 ### PR9: handbook catalogue and use-case library
 
-Waits on: PR3 to PR7, needed before this group can start, because the library records the new envelope. The reason for a separate PR is a different repository.
+Waits on: PR3 to PR7, needed before this group can start, because the library records the new envelope. It also waits on U11's flag fix merged from PR10, because the host list reads those flags. The reason for a separate PR is a different repository.
 
 ### U9. Generated tool catalogue and use-case library
 
 - **Goal:** one generated page lists every tool on every live Beta MCP server, and a library of dated real calls shows each server in use.
 - **Requirements:** R14; KTD10.
-- **Dependencies:** U3 to U7.
+- **Dependencies:** U3 to U7, U11.
 - **Files:** create in `handbook`:
   - `scripts/mcp_catalogue/catalogue.py`, `scripts/mcp_catalogue/use_cases.py`, `scripts/mcp_catalogue/test_catalogue.py`;
   - `catalogue/mcp-tools.md` (generated), `catalogue/use-cases/*.yaml`, `catalogue/use-cases/runs/`.
 - **Approach:**
   1. Read the host list from `beta-infra` `terraform/hostnames.yaml`, using hosts with `mcp: true` after U11.
-  2. Run `initialize` and `tools/list` on each host. Access-protected hosts use the existing service token, read from 1Password with `op read` at run time and never written to disk.
+  2. Run `initialize` and `tools/list` on each host. Access-protected hosts use the existing service token, read from 1Password with `op read` at run time and never written to disk. Use-case scenarios and recorded answer excerpts are limited to an allowlist of public-data servers: the five statistics servers, plans, atlas and gbfs. Every other host gets `initialize` and `tools/list` only, so no internal answer such as folio, poweroffice or Folk is committed.
   3. Render name, description, source, licence, cache and privacy per tool.
   4. Write 20 to 30 scenarios to start, covering the statistics servers first. Each run records arguments, an answer excerpt, `fetched_at`, the server's build or edition where it has one, and the run date.
 - **Patterns to follow:** TRY's 15 use cases with logged calls (`try-innsyn-dd` `data/uc_call_logs.json`) for the record shape.
@@ -439,6 +477,7 @@ Waits on: PR3 to PR7, needed before this group can start, because the library re
   - A host that fails `initialize` is listed as unreachable and does not abort the run.
   - A scenario whose answer check fails is recorded as failed with the answer excerpt.
   - No token or secret appears in any generated file, checked with a sentinel.
+  - A scenario that targets a host outside the allowlist fails the test.
 - **Verification:** the generated page lists every host in `hostnames.yaml` with `mcp: true`, and each listed statistics server has at least four recorded runs.
 
 ### PR10: beta-infra
@@ -454,7 +493,7 @@ Waits on: PR2 tagged, by merge order only, for U12's ancestry baseline. The othe
 - **Approach:**
   1. Add a fifth check after check 4: metadata lists `S256` in `code_challenge_methods_supported`, and a DCR client's authorize request without `code_challenge` gets an error rather than a login redirect.
   2. Write the probe to run it against one Access-protected staging host.
-  3. Record the result in the doc. Access is Cloudflare's code, so a failure is a finding to report to Cloudflare and Johan, not something Beta code can fix.
+  3. Record the result in the doc. Access is Cloudflare's code, so a failure is a finding to report to Cloudflare and Johan, not something Beta code can fix. The probe registers one named client once and reuses it, so repeated runs do not pile up registrations.
 - **Patterns to follow:** the existing four checks in `docs/access-adoption.md`.
 - **Test scenarios:**
   - Against recorded responses, metadata without S256 fails the probe.
@@ -470,7 +509,7 @@ Waits on: PR2 tagged, by merge order only, for U12's ancestry baseline. The othe
 - **Files:** modify `terraform/hostnames.yaml` and `docs/runbook.md` (its stale custom-hostname table); create `tests/test_hostname_mcp_flags.py`.
 - **Approach:**
   1. Before changing a flag, read Cloudflare analytics for the five hosts. Confirm that peak requests per colo and IP over the last 30 days stay well under 100 per 10 s, because the flag puts them under `mcp_rate_limit`.
-  2. Flip the flags.
+  2. Flip the flags. Add gtfs-mcp to `hostnames.yaml` or record why it is excluded, so the catalogue and the flag test name the same hosts.
   3. The test asserts that every service with an Access app in `terraform/prod/access.auto.tfvars.json`, or a known `/mcp` path, has `mcp: true`.
   4. The terraform plan must show the ruleset updated in place. A delete or replace stops the unit (Goal Capsule).
 - **Patterns to follow:** `tests/test_access_inventory.py`.
@@ -488,7 +527,7 @@ Waits on: PR2 tagged, by merge order only, for U12's ancestry baseline. The othe
 - **Files:** create `scripts/core_pins.py`, `tests/test_core_pins.py`, `.github/workflows/core-pins.yml`, `inventory/core-pins-allowlist.json`.
 - **Approach:**
   1. List service repos from `terraform/prod/services.auto.tfvars.json`.
-  2. Read each repo's pin through the GitHub API, from `requirements.txt`, `pyproject.toml` (dependencies and `[tool.uv.sources]`) and `uv.lock`.
+  2. Read each repo's pin through the GitHub API, from `requirements.txt`, `pyproject.toml` (dependencies and `[tool.uv.sources]`) and `uv.lock`. The workflow uses an installation token from a GitHub App with read-only contents on the listed repos and `issues: write` on `beta-infra` only, never a personal token. If the existing dispatch app lacks read access, a read-only app is added.
   3. Resolve the pin to a core commit and test ancestry against the baseline tag (KTD9). Where a lockfile exists, also check that it resolves to the declared commit (`claude-config` `docs/solutions/deploy-issues/exact-version-pin-does-not-pin-the-dependency-tree.md`).
   4. Open or update one issue listing every repo behind.
   5. beta-os is allowlisted with an expiry date.
@@ -499,7 +538,7 @@ Waits on: PR2 tagged, by merge order only, for U12's ancestry baseline. The othe
   - A pin on v0.5.0 with v0.6.0 latest is not reported.
   - A lockfile resolving to a different commit than declared is reported.
   - An allowlisted repo past its expiry is reported.
-  - A repo that cannot be read is listed as unreadable, not as current.
+  - A repo that cannot be read is listed as unreadable, not as current, and the manual dispatch in Verification fails if any repo is unreadable.
 - **Verification:** one manual dispatch produces an issue that lists today's behind repos (plans, gbfs, folio, atlas, Folk, beta-os allowlisted).
 
 ### U13. Metadata cache bucket for the statistics servers
@@ -545,7 +584,7 @@ After each server deploy:
 ## Definition of Done
 
 - Every unit's Verification holds, and every PR is merged and deploy-verified as the Verification Contract states.
-- No migrated server changed the type of an existing field. Each server's contract test proves this against its pre-migration fixtures.
+- No migrated server changed the type of an existing field. Each server's contract test proves this with `assert_valid_envelope` against the baseline answers recorded from the unmodified code.
 - Mission Control shows `cache` and `upstream_band` for all five statistics servers.
 - The catalogue page and at least 20 recorded use-case runs are on the handbook's `main`.
 - The weekly core-version issue exists and is accurate.
