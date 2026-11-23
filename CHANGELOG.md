@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.6.0
+
+- A shared response envelope in `beta_mcp_core.envelope`: `source`, `reading_notes`,
+  `truncation`, `coded_error`, `error_code`, `fit`, `estimate_tokens`, the closed
+  `ERROR_CODES` list and `MAX_RESPONSE_TOKENS` (20,000). It is additive: servers keep their
+  own keys and types, and `error_code` sits beside the existing `error`.
+- `stamped_cache`, `StampedCache` and `Stamped` in `beta_mcp_core.cache`: a TTL cache that
+  stamps each value with its fetch time, reports hits and misses, copies values in and out,
+  and never stores empty or error values. `GcsStore` keeps entries in Cloud Storage behind
+  the new `gcs` extra. `ttl_cache` is unchanged.
+- `ToolAnalyticsMiddleware(report_cache_and_upstream=True)` adds `cache` and `upstream_band`
+  to tool events, from `record_cache` and the new `upstream_timer` in
+  `beta_mcp_core.analytics`. Off by default, so events stay `{tool, duration_band}` until a
+  server opts in.
+- Contract test helpers in `beta_mcp_core.testing`: `assert_valid_envelope` and
+  `assert_tool_surface`.
+
 ## v0.5.0
 
 - One MCP path for the fleet. `build_asgi_app(..., legacy_paths=["/folio"])` keeps old

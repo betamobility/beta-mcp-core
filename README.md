@@ -11,16 +11,20 @@ remote MCP servers:
 - Starlette `/health` and dual stdio/HTTP entrypoint helpers
 - Supabase asyncpg pooler DSN parsing
 - TTL cache and caller identity helpers
+- the shared response envelope, a stamped cache and the contract test helpers
 
 ## Install
 
-Access mode was released in v0.3.0; v0.4.0 supports FastMCP 3.4.11 and later 3.x
-as well as FastMCP 4. Resolve the release to a commit SHA and pin that SHA in member
-repositories; the tag below identifies the release:
+The current release is v0.6.0. It supports FastMCP 3.4.11 and later 3.x as well as
+FastMCP 4. Resolve the release to a commit SHA and pin that SHA in member repositories;
+the tag below identifies the release:
 
 ```text
-beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.4.0
+beta-mcp-core @ git+https://github.com/betamobility/beta-mcp-core@v0.6.0
 ```
+
+A server that keeps its metadata cache in Cloud Storage installs the `gcs` extra:
+`beta-mcp-core[gcs] @ git+...`.
 
 A member repo that installs with `pip --require-hashes` cannot hash a git requirement.
 Pin the commit's archive URL instead, which `uv pip compile --generate-hashes` can hash:
@@ -130,3 +134,38 @@ Without an HTTP request (including stdio), events retain the truthful
 traffic may be filtered by Plausible and cannot guarantee distinct user counts.
 A dropped receipt remains a delivery failure; never fabricate a browser or
 visitor IP to bypass filtering.
+
+## Response envelope
+
+`beta_mcp_core.envelope` gives every server the same answer shape, added beside the
+server's own keys. No existing field changes name or type.
+
+| Key | Type | Built with |
+|---|---|---|
+| `sources` | list of `{id, name, url, licence, attribution, fetched_at, cached}` | `source(...)` |
+| `reading_notes` | list of strings | `reading_notes(...)` |
+| `truncation` | `{reason, cut, how_to_continue}`, only when something was cut | `truncation(...)`, `fit(...)` |
+| `error_code` | one of `ERROR_CODES`, beside the existing `error` | `coded_error(code, message)` |
+
+- `fit(answer, cuts, how_to_continue=...)` cuts an answer in place, in the order given, until
+  it is under 20,000 estimated tokens (JSON characters / 3), and records what it cut. A server
+  may pass a lower `cap`, never a higher one. Where a server already has a `truncated` bool,
+  `fit` sets it true; it never adds one.
+- An unknown error code raises while tests run and becomes `internal_error` in a running
+  server. Adding a code to `ERROR_CODES` is a minor release.
+
+`stamped_cache(ttl=..., bucket_env="METADATA_CACHE_BUCKET", prefix="ssb")` returns a cache
+whose `get_or_load` / `aget_or_load` answer a `Stamped(value, fetched_at, cached)`. Values are
+copied in and out, empty and error values are never stored, and with the bucket variable set
+(and the `gcs` extra installed) entries also live in Cloud Storage and survive a cold start,
+keeping their original `fetched_at`. Without the variable the cache is memory only.
+
+`ToolAnalyticsMiddleware(..., report_cache_and_upstream=True)` adds `cache` (`hit`, `miss`,
+`none`) and `upstream_band` to each tool event, from what the stamped cache and
+`analytics.upstream_timer()` recorded during the call. Turn it on only after Mission Control
+accepts both props, because it rejects events with props it does not know.
+
+In a server's tests, `beta_mcp_core.testing.assert_valid_envelope(answer, baseline=...)`
+checks each answer against the contract and against the answer the server gave before it
+adopted the envelope, and `assert_tool_surface(server, snapshot_path, max_chars=...)` keeps
+the tool list from changing or growing unnoticed.

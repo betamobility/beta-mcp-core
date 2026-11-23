@@ -10,7 +10,7 @@ from beta_mcp_core.auth import (
     resolve_identity,
 )
 from beta_mcp_core.branding import BETA_ICON_URL, BETA_WEBSITE_URL, apply_beta_branding, beta_icons
-from beta_mcp_core.cache import ttl_cache
+from beta_mcp_core.cache import Stamped, StampedCache, stamped_cache, ttl_cache
 from beta_mcp_core.db import close_pool, create_pool, parse_pooler_dsn
 from beta_mcp_core.identity import get_caller
 from beta_mcp_core.paths import McpPathAliasMiddleware, normalize_mcp_paths
@@ -36,7 +36,10 @@ __all__ = [
     "parse_pooler_dsn",
     "resolve_identity",
     "run",
+    "Stamped",
+    "StampedCache",
+    "stamped_cache",
     "ttl_cache",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
