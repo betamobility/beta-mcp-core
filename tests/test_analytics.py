@@ -5,7 +5,8 @@ import httpx
 import pytest
 from fastmcp import Client, FastMCP
 
-from beta_mcp_core.analytics import ToolAnalyticsMiddleware
+from beta_mcp_core.analytics import ToolAnalyticsMiddleware, _duration_band, upstream_timer
+from beta_mcp_core.cache import stamped_cache
 
 
 def setup(handler, **kwargs):
@@ -343,3 +344,137 @@ async def test_classifier_failure_does_not_change_tool_result(caplog):
     assert payloads == []
     assert "analytics skipped: outcome classification failed" in caplog.text
     assert "private" not in caplog.text
+
+
+# -- cache and upstream props ---------------------------------------------------------------
+
+
+# What Mission Control's analytics allowlist accepts for these props.
+MC_CACHE = {"hit", "miss", "none"}
+MC_BANDS = {"lt_1s", "1_5s", "5_30s", "gte_30s"}
+
+
+def cached_server(receive, **kwargs):
+    sender = httpx.AsyncClient(transport=httpx.MockTransport(receive))
+    analytics = ToolAnalyticsMiddleware(
+        component_id="test-mcp", ingest_url="https://mc.example/analytics/event",
+        ingest_token="private-token", enabled=True, environment="production",
+        client=sender, **kwargs,
+    )
+    server = FastMCP("test", middleware=[analytics])
+    cache = stamped_cache()
+
+    @server.tool
+    async def lookup(key: str) -> dict:
+        return (await cache.aget_or_load(key, _load)).value
+
+    async def _load():
+        await asyncio.sleep(0)
+        return {"value": 1}
+
+    @server.tool
+    def lookup_in_thread(key: str) -> dict:
+        return cache.get_or_load(key, lambda: {"value": 2}).value
+
+    @server.tool
+    async def lookup_via_to_thread(key: str) -> dict:
+        return await asyncio.to_thread(
+            lambda: cache.get_or_load(key, lambda: {"value": 3}).value
+        )
+
+    @server.tool
+    async def plain() -> str:
+        return "no cache"
+
+    @server.tool
+    async def timed_only() -> str:
+        with upstream_timer():
+            await asyncio.sleep(0)
+        return "fetched"
+
+    return server, analytics, sender, None
+
+
+def collector():
+    payloads = []
+
+    def receive(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"status": "ok", "plausible": "ok"})
+
+    return payloads, receive
+
+
+async def test_without_the_opt_in_events_carry_exactly_tool_and_duration():
+    payloads, receive = collector()
+    server, analytics, sender, _ = cached_server(receive)
+    async with sender, Client(server) as client:
+        await client.call_tool("lookup", {"key": "a"})
+        await client.call_tool("lookup", {"key": "a"})
+        await analytics.drain()
+    assert [set(p["props"]) for p in payloads] == [{"tool", "duration_band"}] * 2
+
+
+async def test_with_the_opt_in_events_report_miss_then_hit():
+    payloads, receive = collector()
+    server, analytics, sender, _ = cached_server(receive, report_cache_and_upstream=True)
+    async with sender, Client(server) as client:
+        await client.call_tool("lookup", {"key": "a"})
+        await client.call_tool("lookup", {"key": "a"})
+        await analytics.drain()
+    first, second = (p["props"] for p in payloads)
+    assert first["cache"] == "miss" and first["upstream_band"] == "lt_1s"
+    assert second["cache"] == "hit" and "upstream_band" not in second
+
+
+async def test_a_call_that_used_no_cache_reports_none():
+    payloads, receive = collector()
+    server, analytics, sender, _ = cached_server(receive, report_cache_and_upstream=True)
+    async with sender, Client(server) as client:
+        await client.call_tool("plain", {})
+        await client.call_tool("timed_only", {})
+        await analytics.drain()
+    plain, timed = (p["props"] for p in payloads)
+    assert plain["cache"] == "none" and "upstream_band" not in plain
+    assert timed["cache"] == "none" and timed["upstream_band"] == "lt_1s"
+
+
+@pytest.mark.parametrize("tool", ["lookup_in_thread", "lookup_via_to_thread"])
+async def test_a_cache_hit_in_another_thread_still_counts(tool):
+    payloads, receive = collector()
+    server, analytics, sender, _ = cached_server(receive, report_cache_and_upstream=True)
+    async with sender, Client(server) as client:
+        await client.call_tool(tool, {"key": "t"})
+        await client.call_tool(tool, {"key": "t"})
+        await analytics.drain()
+    assert [p["props"]["cache"] for p in payloads] == ["miss", "hit"]
+
+
+async def test_concurrent_calls_do_not_share_their_stats():
+    payloads, receive = collector()
+    server, analytics, sender, _ = cached_server(receive, report_cache_and_upstream=True)
+    async with sender, Client(server) as client:
+        await client.call_tool("lookup", {"key": "warm"})
+        await asyncio.gather(*(
+            client.call_tool("lookup", {"key": key})
+            for key in ["warm", "cold-1", "warm", "cold-2", "warm"]
+        ))
+        await analytics.drain()
+    states = sorted(p["props"]["cache"] for p in payloads[1:])
+    assert states == ["hit", "hit", "hit", "miss", "miss"]
+
+
+def test_every_emittable_value_is_one_mission_control_accepts():
+    for seconds in (0, 0.5, 1, 4.9, 5, 29.9, 30, 3600):
+        assert _duration_band(seconds) in MC_BANDS
+    from beta_mcp_core.analytics import _CallStats, _call_stats, record_cache
+
+    for lookups in ([], ["hit"], ["miss"], ["hit", "miss", "hit"]):
+        holder = _CallStats()
+        token = _call_stats.set(holder)
+        try:
+            for state in lookups:
+                record_cache(state)
+        finally:
+            _call_stats.reset(token)
+        assert (holder.cache or "none") in MC_CACHE

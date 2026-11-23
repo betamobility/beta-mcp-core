@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 import logging
+import threading
 from ipaddress import ip_address
 import re
 import time
@@ -30,11 +34,55 @@ def _duration_band(seconds: float) -> str:
     return "gte_30s"
 
 
+@dataclass
+class _CallStats:
+    """What one tool call did upstream, shared with any thread the call hops to."""
+
+    cache: str | None = None
+    upstream_seconds: float | None = None
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+
+_call_stats: ContextVar[_CallStats | None] = ContextVar("beta_mcp_core_call_stats", default=None)
+
+
+def record_cache(state: str) -> None:
+    """Record a cache lookup for the current tool call. A call is a hit only when every
+    lookup it made hit; one miss makes it a miss. Outside a tool call this does nothing."""
+    stats = _call_stats.get()
+    if stats is None:
+        return
+    with stats._lock:
+        if stats.cache != "miss":
+            stats.cache = "miss" if state == "miss" else "hit"
+
+
+@contextmanager
+def upstream_timer() -> Iterator[None]:
+    """Time an upstream request for the current tool call's ``upstream_band``. Several timed
+    requests in one call add up. Usable in sync and async code; outside a tool call it only
+    times."""
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        stats = _call_stats.get()
+        if stats is not None:
+            elapsed = time.monotonic() - started
+            with stats._lock:
+                stats.upstream_seconds = (stats.upstream_seconds or 0.0) + elapsed
+
+
 class ToolAnalyticsMiddleware(Middleware):
     """Record completed tool calls across HTTP and stdio, without recording content.
 
     Register once on the FastMCP instance. Call ``drain`` during shutdown, before
     closing an injected HTTP client. Delivery failures never fail a tool call.
+
+    ``report_cache_and_upstream=True`` adds ``cache`` (``hit``, ``miss`` or ``none``) and,
+    when the call reached upstream, ``upstream_band`` to each event, from what
+    ``stamped_cache`` and ``upstream_timer`` recorded during the call. Turn it on only once
+    Mission Control accepts both props: it rejects an event with a prop it does not know.
     """
 
     def __init__(
@@ -50,7 +98,9 @@ class ToolAnalyticsMiddleware(Middleware):
         error_result_key: str | None = None,
         error_result_predicate: Callable[[str, Any], bool] | None = None,
         client: httpx.AsyncClient | None = None,
+        report_cache_and_upstream: bool = False,
     ) -> None:
+        self._report_cache_and_upstream = report_cache_and_upstream
         self._trust_cloudflare_client_ip = trust_cloudflare_client_ip
         self._error_result_key = error_result_key
         self._error_result_predicate = error_result_predicate
@@ -95,6 +145,8 @@ class ToolAnalyticsMiddleware(Middleware):
         if not registered:
             return await call_next(context)
         attribution = self._request_attribution()
+        stats = _CallStats() if self._report_cache_and_upstream else None
+        token = _call_stats.set(stats) if stats is not None else None
         started = time.monotonic()
         outcome = "error"
         try:
@@ -119,8 +171,10 @@ class ToolAnalyticsMiddleware(Middleware):
             )
             return result
         finally:
+            if token is not None:
+                _call_stats.reset(token)
             if outcome is not None:
-                self._enqueue(name, outcome, time.monotonic() - started, attribution)
+                self._enqueue(name, outcome, time.monotonic() - started, attribution, stats)
 
     def _request_attribution(self) -> dict[str, str]:
         headers = {"User-Agent": "beta-mcp-core/analytics"}
@@ -146,6 +200,7 @@ class ToolAnalyticsMiddleware(Middleware):
 
     def _enqueue(
         self, tool: str, outcome: str, elapsed: float, attribution: dict[str, str],
+        stats: _CallStats | None = None,
     ) -> None:
         if len(self._pending) >= self._max_pending:
             logger.warning("analytics delivery failed: queue full")
@@ -161,6 +216,10 @@ class ToolAnalyticsMiddleware(Middleware):
             "forward_to_plausible": True,
             "props": {"tool": tool, "duration_band": _duration_band(elapsed)},
         }
+        if stats is not None:
+            payload["props"]["cache"] = stats.cache or "none"
+            if stats.upstream_seconds is not None:
+                payload["props"]["upstream_band"] = _duration_band(stats.upstream_seconds)
         task = asyncio.create_task(self._send(payload, attribution))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
