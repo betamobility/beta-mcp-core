@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.1
+
+- Remove an unreachable copy of the old cut loop left after `fit()`'s final return in
+  v0.6.0. No behaviour change: the block could never run. Servers on v0.6.0 need not move.
+
 ## v0.6.0
 
 - A shared response envelope in `beta_mcp_core.envelope`: `source`, `reading_notes`,
