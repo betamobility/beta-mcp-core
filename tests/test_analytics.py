@@ -346,7 +346,6 @@ async def test_classifier_failure_does_not_change_tool_result(caplog):
     assert "private" not in caplog.text
 
 
-# -- cache and upstream props ---------------------------------------------------------------
 
 
 # What Mission Control's analytics allowlist accepts for these props.

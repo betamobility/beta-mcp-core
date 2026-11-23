@@ -56,7 +56,6 @@ def _kind(value: Any) -> str:
 
 
 def _same_shape(baseline: Any, current: Any, path: str) -> None:
-    # A null on either side is a nullable field, not a type change.
     if baseline is None or current is None:
         return
     before, after = _kind(baseline), _kind(current)
@@ -90,7 +89,9 @@ def assert_valid_envelope(
             f"error_code {answer['error_code']!r} is not in ERROR_CODES"
         )
         assert answer.get("error"), "error_code is set but error is missing or empty"
-    elif not answer.get("error"):
+    elif answer.get("error"):
+        raise AssertionError("an answer with error must also carry error_code")
+    else:
         for key in ("sources", "reading_notes"):
             assert isinstance(answer.get(key), list), f"{key} must be a list on every answer"
         for i, record in enumerate(answer["sources"]):
@@ -104,8 +105,6 @@ def assert_valid_envelope(
         assert all(isinstance(n, str) for n in answer["reading_notes"]), (
             "reading_notes must be strings"
         )
-    else:
-        raise AssertionError("an answer with error must also carry error_code")
 
     if "truncation" in answer:
         record = answer["truncation"]
@@ -142,13 +141,16 @@ def _surface(server: Any) -> dict[str, Any]:
             out[tool.name] = entry
         return out
 
-    # Run in a thread of its own, so the check also works from an async test.
+    return _run_outside_the_callers_loop(read())
+
+
+def _run_outside_the_callers_loop(coro: Any) -> Any:
     box: dict[str, Any] = {}
 
     def run() -> None:
         try:
-            box["value"] = asyncio.run(read())
-        except BaseException as exc:  # handed to the caller below
+            box["value"] = asyncio.run(coro)
+        except BaseException as exc:
             box["error"] = exc
 
     thread = threading.Thread(target=run)

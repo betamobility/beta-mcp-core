@@ -37,9 +37,7 @@ logger = logging.getLogger(__name__)
 
 MAX_RESPONSE_TOKENS = 20_000
 
-# One closed list for every server. Adding a code is a minor release of this package.
 ERROR_CODES: tuple[str, ...] = (
-    # The request
     "invalid_cursor",
     "invalid_dimension",
     "invalid_filters",
@@ -60,13 +58,11 @@ ERROR_CODES: tuple[str, ...] = (
     "unsupported_dataset",
     "unsupported_format",
     "unsupported_selection",
-    # Limits on this server
     "download_limit",
     "rate_limited",
     "resource_limit",
     "timeout",
     "unsafe_url",
-    # The upstream source
     "schema_changed",
     "source_changed",
     "source_error",
@@ -82,16 +78,13 @@ ERROR_CODES: tuple[str, ...] = (
     "upstream_schema",
     "upstream_unavailable",
     "retrieval_unavailable",
-    # Anything else
     "internal_error",
 )
 
 _SIZE_CAP = "size_cap"
 
 
-def _strict() -> bool:
-    # pytest sets this for the duration of every test, so a typo in a code fails the
-    # server's own test run, while a deployed server degrades instead of crashing.
+def _under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ
 
 
@@ -103,7 +96,7 @@ def error_code(code: str) -> str:
     """
     if code in ERROR_CODES:
         return code
-    if _strict():
+    if _under_pytest():
         raise ValueError(f"unknown error code {code!r}; add it to ERROR_CODES first")
     logger.warning("unknown error code %r reported as internal_error", code)
     return "internal_error"
@@ -198,13 +191,10 @@ def fit(
                 break
             made[name] = made.get(name, 0) + 1
             size = note()
-            # Measuring after every item re-serialises the whole answer. Once one cut shows
-            # roughly what an item weighs, take half the remaining excess in one go, so a
-            # large answer converges in a handful of measurements without cutting far past
-            # the cap.
-            step = before - size
-            if size > cap and step > 0:
-                for _ in range((size - cap) // step // 2):
+            tokens_per_item = before - size
+            if size > cap and tokens_per_item > 0:
+                half_the_excess_in_items = (size - cap) // tokens_per_item // 2
+                for _ in range(half_the_excess_in_items):
                     if not cut(response):
                         break
                     made[name] += 1

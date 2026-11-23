@@ -46,7 +46,6 @@ def cut_last(key: str):
     return cut
 
 
-# -- coded errors ---------------------------------------------------------------------------
 
 
 def test_cell_limit_error_keeps_the_string_and_adds_the_code():
@@ -93,7 +92,6 @@ def test_error_codes_are_unique_snake_case():
     assert all(code.replace("_", "").isalnum() and code.islower() for code in ERROR_CODES)
 
 
-# -- sources and notes ----------------------------------------------------------------------
 
 
 def test_source_record_carries_every_field():
@@ -126,7 +124,6 @@ def test_truncation_record_shape():
     }
 
 
-# -- fit ------------------------------------------------------------------------------------
 
 
 def test_answer_under_the_cap_passes_through_unchanged():

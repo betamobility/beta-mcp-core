@@ -130,11 +130,16 @@ class StampedCache:
             return None
         return self._hit(entry)
 
+    def _remember_if_storable(self, key: str, fetched: float, value: Any) -> bool:
+        if not _storable(value):
+            return False
+        self._remember(key, fetched, copy.deepcopy(value))
+        return True
+
     def put(self, key: str, value: Any, *, fetched: float | None = None) -> Stamped:
         """Store a freshly fetched value, unless it is empty or an error, and stamp it."""
         fetched = self._clock() if fetched is None else fetched
-        if _storable(value):
-            self._remember(key, fetched, copy.deepcopy(value))
+        if self._remember_if_storable(key, fetched, value):
             self._to_store(key, fetched, value)
         return Stamped(value, _iso(fetched), False)
 
@@ -158,10 +163,7 @@ class StampedCache:
         with upstream_timer():
             value = await load()
         fetched = self._clock()
-        if not _storable(value):
-            return Stamped(value, _iso(fetched), False)
-        self._remember(key, fetched, copy.deepcopy(value))
-        if self.store is not None:
+        if self._remember_if_storable(key, fetched, value) and self.store is not None:
             await asyncio.to_thread(self._to_store, key, fetched, value)
         return Stamped(value, _iso(fetched), False)
 
@@ -203,6 +205,26 @@ class GcsStore:
         self._blob(key).upload_from_string(data, content_type="application/json")
 
 
+def _gcs_store(bucket_env: str | None, prefix: str, schema_version: int) -> GcsStore | None:
+    bucket_name = os.environ.get(bucket_env, "").strip() if bucket_env else ""
+    if not bucket_name:
+        return None
+    try:
+        from google.cloud import storage
+    except ImportError:
+        logger.warning(
+            "%s is set but google-cloud-storage is not installed; cache is memory only",
+            bucket_env,
+        )
+        return None
+    try:
+        bucket = storage.Client().bucket(bucket_name)
+    except Exception:
+        logger.warning("%s is set but the bucket client failed; cache is memory only", bucket_env)
+        return None
+    return GcsStore(bucket, prefix=prefix or "cache", schema_version=schema_version)
+
+
 def stamped_cache(
     *,
     maxsize: int = 1024,
@@ -216,22 +238,5 @@ def stamped_cache(
     a bucket name, entries are also kept in that Cloud Storage bucket under ``prefix``
     (install ``beta-mcp-core[gcs]``). Without the variable, or without the storage library,
     the cache is memory only."""
-    store = None
-    bucket_name = os.environ.get(bucket_env, "").strip() if bucket_env else ""
-    if bucket_name:
-        try:
-            from google.cloud import storage
-        except ImportError:
-            logger.warning(
-                "%s is set but google-cloud-storage is not installed; cache is memory only",
-                bucket_env,
-            )
-        else:
-            try:
-                bucket = storage.Client().bucket(bucket_name)
-            except Exception:
-                logger.warning("%s is set but the bucket client failed; cache is memory only",
-                               bucket_env)
-            else:
-                store = GcsStore(bucket, prefix=prefix or "cache", schema_version=schema_version)
+    store = _gcs_store(bucket_env, prefix, schema_version)
     return StampedCache(maxsize=maxsize, ttl=ttl, store=store, clock=clock)

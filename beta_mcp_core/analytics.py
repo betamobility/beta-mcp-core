@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 import logging
 import threading
 from ipaddress import ip_address
@@ -34,27 +34,36 @@ def _duration_band(seconds: float) -> str:
     return "gte_30s"
 
 
+CacheLookup = Literal["hit", "miss"]
+
+
 @dataclass
 class _CallStats:
     """What one tool call did upstream, shared with any thread the call hops to."""
 
-    cache: str | None = None
+    cache: CacheLookup | None = None
     upstream_seconds: float | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def note_cache(self, lookup: CacheLookup) -> None:
+        with self._lock:
+            if self.cache != "miss":
+                self.cache = lookup
+
+    def add_upstream(self, seconds: float) -> None:
+        with self._lock:
+            self.upstream_seconds = (self.upstream_seconds or 0.0) + seconds
 
 
 _call_stats: ContextVar[_CallStats | None] = ContextVar("beta_mcp_core_call_stats", default=None)
 
 
-def record_cache(state: str) -> None:
+def record_cache(lookup: CacheLookup) -> None:
     """Record a cache lookup for the current tool call. A call is a hit only when every
     lookup it made hit; one miss makes it a miss. Outside a tool call this does nothing."""
     stats = _call_stats.get()
-    if stats is None:
-        return
-    with stats._lock:
-        if stats.cache != "miss":
-            stats.cache = "miss" if state == "miss" else "hit"
+    if stats is not None:
+        stats.note_cache(lookup)
 
 
 @contextmanager
@@ -68,9 +77,7 @@ def upstream_timer() -> Iterator[None]:
     finally:
         stats = _call_stats.get()
         if stats is not None:
-            elapsed = time.monotonic() - started
-            with stats._lock:
-                stats.upstream_seconds = (stats.upstream_seconds or 0.0) + elapsed
+            stats.add_upstream(time.monotonic() - started)
 
 
 class ToolAnalyticsMiddleware(Middleware):

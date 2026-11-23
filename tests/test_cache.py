@@ -18,7 +18,6 @@ def test_ttl_cache_expires_values():
 
 
 
-# -- stamped cache --------------------------------------------------------------------------
 
 
 
@@ -166,7 +165,6 @@ def test_concurrent_threads_share_one_cache_safely():
     assert errors == []
 
 
-# -- shared metadata store ------------------------------------------------------------------
 
 
 class FakeBlob:

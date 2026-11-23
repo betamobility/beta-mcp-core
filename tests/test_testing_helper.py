@@ -96,7 +96,6 @@ def test_a_fitted_answer_passes():
     assert_valid_envelope(answer)
 
 
-# -- baseline -------------------------------------------------------------------------------
 
 
 def test_the_baseline_passes_when_only_keys_were_added():
@@ -144,7 +143,6 @@ def test_a_call_result_object_is_read_through_its_structured_content():
     assert_valid_envelope(Result())
 
 
-# -- tool surface ---------------------------------------------------------------------------
 
 
 def make_server(description: str = "Search SSB tables. Then call ssb_metadata.") -> FastMCP:
