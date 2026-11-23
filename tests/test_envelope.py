@@ -203,3 +203,24 @@ def test_fit_stops_when_no_cut_has_anything_left():
     fit(answer, [("rows", cut_last("rows"))], how_to_continue="x", cap=1_000)
     assert answer["rows"] == []
     assert answer["truncation"]["cut"]["rows"] == 5
+
+
+def test_a_small_item_cut_first_does_not_empty_the_answer():
+    answer = {"rows": [{"v": "x" * 300} for _ in range(400)] + [{"v": "x" * 30}]}
+    fit(answer, [("rows", cut_last("rows"))], how_to_continue="x")
+    assert estimate_tokens(answer) <= MAX_RESPONSE_TOKENS
+    assert len(answer["rows"]) > 150
+
+
+def test_nothing_cut_means_no_truncation_record(caplog):
+    answer = {"text": "t" * 90_000, "rows": [], "truncated": False}
+    fit(answer, [("rows", cut_last("rows"))], how_to_continue="x")
+    assert "truncation" not in answer
+    assert answer["truncated"] is False
+    assert "over the cap" in caplog.text
+
+
+def test_an_answer_still_over_the_cap_is_logged(caplog):
+    answer = {"text": "t" * 10_000, "rows": rows(5)}
+    fit(answer, [("rows", cut_last("rows"))], how_to_continue="x", cap=1_000)
+    assert "over the cap" in caplog.text

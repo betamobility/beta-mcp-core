@@ -161,6 +161,12 @@ def fit(
     is written before each measurement, so it counts against the cap itself. An answer that
     already fits is returned untouched.
 
+    Cuts are made in batches that grow only while the heaviest item seen so far says the
+    batch cannot overshoot, so items of uneven size never empty the answer. When the cuts run
+    out before the answer fits, the answer is returned as it is and a warning is logged; a
+    caller whose answers can stay over the cap needs a cut for its largest field. When nothing
+    could be cut, the answer keeps its original truncation fields.
+
     Run it last, after anything computed from the full data, and never on a value that is
     still held in a cache.
     """
@@ -169,6 +175,58 @@ def fit(
     size = estimate_tokens(response)
     if size <= cap:
         return response
+    had_truncation, original_truncation = "truncation" in response, response.get("truncation")
+    had_truncated, original_truncated = "truncated" in response, response.get("truncated")
+    earlier = dict((original_truncation or {}).get("cut") or {})
+    made: dict[str, int] = {}
+
+    def note() -> int:
+        cut = dict(earlier)
+        for name, count in made.items():
+            cut[name] = cut.get(name, 0) + count
+        response["truncation"] = truncation(
+            reason=_SIZE_CAP, cut=cut, how_to_continue=how_to_continue
+        )
+        if isinstance(original_truncated, bool):
+            response["truncated"] = True
+        return estimate_tokens(response)
+
+    size = note()
+    for name, cut in cuts:
+        heaviest_item = 0
+        batch = 1
+        while size > cap:
+            before = size
+            removed = 0
+            for _ in range(batch):
+                if not cut(response):
+                    break
+                removed += 1
+            if not removed:
+                break
+            made[name] = made.get(name, 0) + removed
+            size = note()
+            heaviest_item = max(heaviest_item, (before - size) // removed)
+            if heaviest_item > 0:
+                safe_batch = max(1, (size - cap) // heaviest_item // 2)
+                batch = min(batch * 2, safe_batch)
+        if size <= cap:
+            break
+
+    if not made:
+        if had_truncation:
+            response["truncation"] = original_truncation
+        else:
+            response.pop("truncation", None)
+        if had_truncated:
+            response["truncated"] = original_truncated
+        size = estimate_tokens(response)
+    if size > cap:
+        logger.warning(
+            "answer is still over the cap after every cut: %d estimated tokens, cap %d",
+            size, cap,
+        )
+    return response
     earlier = dict((response.get("truncation") or {}).get("cut") or {})
     made: dict[str, int] = {}
 

@@ -291,3 +291,37 @@ def test_fitting_a_hit_leaves_the_full_rows_for_the_next_hit():
         how_to_continue="x", cap=500)
     assert len(answer["rows"]) < 50
     assert len(cache.get("k").value["rows"]) == 50
+
+
+@pytest.mark.parametrize("value", [None, {}, [], "", {"error": "Tabellen finnes ikke"},
+                                   {"error_code": "not_found"}])
+async def test_async_loads_never_store_empty_or_error_values(value):
+    bucket, clock = FakeBucket(), Clock()
+    cache = gcs_cache(bucket, clock)
+
+    async def load():
+        return value
+
+    stamped = await cache.aget_or_load("k", load)
+    assert stamped.value == value and stamped.cached is False
+    assert cache.get("k") is None
+    assert bucket.blobs == {}
+
+
+def test_the_storage_clients_not_found_is_a_quiet_miss(caplog):
+    from beta_mcp_core.cache import GcsStore
+
+    class NotFound(Exception):
+        pass
+
+    class Blob:
+        def download_as_text(self):
+            raise NotFound("404 No such object")
+
+    class Bucket:
+        def blob(self, name):
+            return Blob()
+
+    cache = StampedCache(store=GcsStore(Bucket(), prefix="ssb"))
+    assert cache.get("missing") is None
+    assert "read failed" not in caplog.text

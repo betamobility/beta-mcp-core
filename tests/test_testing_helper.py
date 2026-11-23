@@ -192,3 +192,8 @@ async def test_the_surface_check_works_inside_a_running_event_loop(tmp_path, mon
     assert_tool_surface(make_server(), tmp_path / "s.json")
     async with Client(make_server()) as client:
         assert [t.name for t in await client.list_tools()] == ["ssb_search"]
+
+
+def test_an_error_without_an_error_code_fails():
+    with pytest.raises(AssertionError, match="must also carry error_code"):
+        assert_valid_envelope({"error": "boom"})
