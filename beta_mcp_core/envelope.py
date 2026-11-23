@@ -227,36 +227,3 @@ def fit(
             size, cap,
         )
     return response
-    earlier = dict((response.get("truncation") or {}).get("cut") or {})
-    made: dict[str, int] = {}
-
-    def note() -> int:
-        cut = dict(earlier)
-        for name, count in made.items():
-            cut[name] = cut.get(name, 0) + count
-        response["truncation"] = truncation(
-            reason=_SIZE_CAP, cut=cut, how_to_continue=how_to_continue
-        )
-        if isinstance(response.get("truncated"), bool):
-            response["truncated"] = True
-        return estimate_tokens(response)
-
-    size = note()
-    for name, cut in cuts:
-        while size > cap:
-            before = size
-            if not cut(response):
-                break
-            made[name] = made.get(name, 0) + 1
-            size = note()
-            tokens_per_item = before - size
-            if size > cap and tokens_per_item > 0:
-                half_the_excess_in_items = (size - cap) // tokens_per_item // 2
-                for _ in range(half_the_excess_in_items):
-                    if not cut(response):
-                        break
-                    made[name] += 1
-                size = note()
-        if size <= cap:
-            break
-    return response
