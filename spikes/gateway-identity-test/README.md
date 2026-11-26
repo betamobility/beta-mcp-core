@@ -13,14 +13,14 @@ without a shared service key (KTD5):
 - For every forwarded call the gateway opens a fresh backend session, signs a 30-second ES256
   statement for that caller and that backend's audience, and sends it in
   `X-Gateway-Statement` with the gateway credential as the bearer.
-- The backend verifies the credential, the signature, the audience and the expiry, and returns
+- The backend verifies the credential, the signature, the audience, the expiry and (folk's door) that the `jti` is new, and returns
   the address it verified. A call for A reaches the backend as A; twelve overlapping calls from
   A and B across both backends each arrive with their own address; a statement for backend one
   is refused by backend two.
 - Folk's side (per-person log, 24-hour differencing, project member list: R8, R9, AE1, AE2) is
   proven in folk's own suite on the spike branch, not here.
 
-Not proven: a real network hop, a real sign-in at the gateway, key rotation, replay protection.
+Not proven: a real network hop, a real sign-in at the gateway, key rotation, replay protection across several folk instances (see finding 5).
 
 ## Header and claim layout (the same in folk's spike door)
 
@@ -69,10 +69,15 @@ read from the installed package:
   4. fastmcp 4.x uses `httpx2`, not `httpx`. A custom `httpx_client_factory` must return an
      `httpx2.AsyncClient`, or the transport rejects its `auth` object ("Invalid auth
      argument"). `httpx2` arrives only as a transitive dependency of fastmcp.
-  5. The same statement header is reused by every request of one backend session
-     (initialize, list, call). A server-side one-time `jti` check would therefore refuse the
-     second request of a session. Replay protection has to rest on the 60 s lifetime and TLS,
-     or on a per-statement session.
+  5. Replay protection and statement reuse. Folk's door now refuses a repeated `jti`
+     (seen-jti cache, each id held until exp plus 5 s leeway, bounded, fail closed when full).
+     The transport's static `headers=` would send one statement on every HTTP request of a
+     session (initialize, list, call), and the second would be refused. The gateway therefore
+     signs per request with an `httpx2.Auth` subclass (`PerRequestStatement`), and a test
+     checks that each backend request carries a different statement. The folk cache is in
+     memory, so it is per process: a multi-instance build needs a shared store (or the
+     statement audience pinned to one instance), or replay across instances is possible
+     within the statement's 60 s life.
   6. The signing helper is duplicated here, not imported from folk.
 
 ## Removing it

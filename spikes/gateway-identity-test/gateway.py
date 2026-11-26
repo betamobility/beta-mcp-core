@@ -18,6 +18,7 @@ import secrets
 import time
 from dataclasses import dataclass
 
+import httpx2
 import jwt
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 from fastmcp import FastMCP
@@ -59,6 +60,21 @@ def sign_statement(
     return jwt.encode(claims, private_key, algorithm="ES256", headers={"kid": kid})
 
 
+class PerRequestStatement(httpx2.Auth):
+    """Adds the credential and a freshly signed statement to every HTTP request of a backend
+    session. One MCP call is several HTTP requests (initialize, list, call) and a backend that
+    refuses a repeated statement (folk does, by `jti`) needs a new one for each."""
+
+    def __init__(self, private_key, kid, email, audience, credential):
+        self._args = (private_key, kid, email, audience)
+        self._credential = credential
+
+    def auth_flow(self, request):
+        request.headers["authorization"] = f"Bearer {self._credential}"
+        request.headers[STATEMENT_HEADER] = sign_statement(*self._args)
+        yield request
+
+
 def spike_identity() -> str:
     """SPIKE ONLY: the inbound `X-Spike-User` header. Raises when there is none."""
     who = get_http_headers().get(SPIKE_USER_HEADER, "").strip().lower()
@@ -83,12 +99,10 @@ def build_gateway(
             # Called once per backend session, so per call: headers are fixed at this moment
             # for this caller and this backend, and the client is dropped afterwards.
             email = identity()
-            statement = sign_statement(private_key, kid, email, backend.audience)
             options = {"httpx_client_factory": httpx_client_factory} if httpx_client_factory else {}
             transport = StreamableHttpTransport(
                 backend.url,
-                auth=credential,  # sent as `Authorization: Bearer <credential>`
-                headers={STATEMENT_HEADER: statement},
+                auth=PerRequestStatement(private_key, kid, email, backend.audience, credential),
                 **options,
             )
             return ProxyClient(transport, forward_incoming_headers=False)

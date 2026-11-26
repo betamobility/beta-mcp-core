@@ -187,3 +187,40 @@ async def test_a_call_without_a_caller_is_refused_by_the_gateway():
         async with as_caller("") as client:
             with pytest.raises(Exception, match="Unknown tool"):
                 await client.call_tool("one_whoami", {})
+
+
+async def test_every_http_request_of_a_session_carries_its_own_statement():
+    """A backend that refuses a repeated jti (folk's door does) still serves a whole call:
+    initialize, listing and call each arrive with a new statement."""
+    seen = []
+    server = stub_backend("backend-one", "one")
+
+    class Spy:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http":
+                headers = dict(scope["headers"])
+                seen.append(headers.get(b"x-gateway-statement"))
+            await self.app(scope, receive, send)
+
+    async with serve(server) as app:
+        spied = Spy(app)
+        gateway = build_gateway(
+            [Backend("one", "http://one.test/mcp", "backend-one")],
+            GATEWAY_KEY,
+            KID,
+            CREDENTIAL,
+            httpx_client_factory=in_process(spied),
+        )
+        async with serve(gateway) as front:
+            transport = StreamableHttpTransport(
+                "http://gateway.test/mcp",
+                headers={SPIKE_USER_HEADER: A},
+                httpx_client_factory=in_process(front),
+            )
+            async with Client(transport) as client:
+                assert text(await client.call_tool("one_whoami", {})) == A
+    statements = [s for s in seen if s]
+    assert len(statements) >= 2 and len(set(statements)) == len(statements)
