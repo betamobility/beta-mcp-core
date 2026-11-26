@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -22,6 +22,7 @@ from fastmcp.server.dependencies import get_http_request
 logger = logging.getLogger(__name__)
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,120}\Z")
 _TOOL_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
+_CORE_PROPS = frozenset({"tool", "duration_band", "cache", "upstream_band"})
 
 
 def _duration_band(seconds: float) -> str:
@@ -90,6 +91,13 @@ class ToolAnalyticsMiddleware(Middleware):
     when the call reached upstream, ``upstream_band`` to each event, from what
     ``stamped_cache`` and ``upstream_timer`` recorded during the call. Turn it on only once
     Mission Control accepts both props: it rejects an event with a prop it does not know.
+
+    ``call_props`` takes the tool name and the call's arguments and returns extra props for
+    that call's event, for example ``{"source": "ssb"}``. Keys and values must be short
+    identifiers, and the core props (``tool``, ``duration_band``, ``cache``,
+    ``upstream_band``) cannot be replaced. If the callable raises or returns anything else,
+    the event is still sent, without its props. Return only props Mission Control accepts,
+    and never argument text: the value is recorded as given.
     """
 
     def __init__(
@@ -106,8 +114,10 @@ class ToolAnalyticsMiddleware(Middleware):
         error_result_predicate: Callable[[str, Any], bool] | None = None,
         client: httpx.AsyncClient | None = None,
         report_cache_and_upstream: bool = False,
+        call_props: Callable[[str, Mapping[str, Any]], Mapping[str, str]] | None = None,
     ) -> None:
         self._report_cache_and_upstream = report_cache_and_upstream
+        self._call_props = call_props
         self._trust_cloudflare_client_ip = trust_cloudflare_client_ip
         self._error_result_key = error_result_key
         self._error_result_predicate = error_result_predicate
@@ -152,6 +162,7 @@ class ToolAnalyticsMiddleware(Middleware):
         if not registered:
             return await call_next(context)
         attribution = self._request_attribution()
+        extra_props = self._extra_props(name, context.message.arguments)
         stats = _CallStats() if self._report_cache_and_upstream else None
         token = _call_stats.set(stats) if stats is not None else None
         started = time.monotonic()
@@ -181,7 +192,27 @@ class ToolAnalyticsMiddleware(Middleware):
             if token is not None:
                 _call_stats.reset(token)
             if outcome is not None:
-                self._enqueue(name, outcome, time.monotonic() - started, attribution, stats)
+                self._enqueue(
+                    name, outcome, time.monotonic() - started, attribution, stats, extra_props,
+                )
+
+    def _extra_props(self, tool: str, arguments: Mapping[str, Any] | None) -> dict[str, str]:
+        if self._call_props is None:
+            return {}
+        try:
+            props = self._call_props(tool, dict(arguments or {}))
+        except Exception:
+            logger.warning("analytics props callback failed: event sent without its props")
+            return {}
+        if not isinstance(props, Mapping) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            and key not in _CORE_PROPS
+            and _IDENTIFIER.fullmatch(key) and _IDENTIFIER.fullmatch(value)
+            for key, value in props.items()
+        ):
+            logger.warning("analytics props callback returned invalid props: event sent without them")
+            return {}
+        return dict(props)
 
     def _request_attribution(self) -> dict[str, str]:
         headers = {"User-Agent": "beta-mcp-core/analytics"}
@@ -207,7 +238,7 @@ class ToolAnalyticsMiddleware(Middleware):
 
     def _enqueue(
         self, tool: str, outcome: str, elapsed: float, attribution: dict[str, str],
-        stats: _CallStats | None = None,
+        stats: _CallStats | None = None, extra_props: Mapping[str, str] | None = None,
     ) -> None:
         if len(self._pending) >= self._max_pending:
             logger.warning("analytics delivery failed: queue full")
@@ -227,6 +258,8 @@ class ToolAnalyticsMiddleware(Middleware):
             payload["props"]["cache"] = stats.cache or "none"
             if stats.upstream_seconds is not None:
                 payload["props"]["upstream_band"] = _duration_band(stats.upstream_seconds)
+        if extra_props:
+            payload["props"].update(extra_props)
         task = asyncio.create_task(self._send(payload, attribution))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)

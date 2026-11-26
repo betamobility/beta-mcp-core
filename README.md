@@ -165,6 +165,12 @@ keeping their original `fetched_at`. Without the variable the cache is memory on
 `analytics.upstream_timer()` recorded during the call. Turn it on only after Mission Control
 accepts both props, because it rejects events with props it does not know.
 
+`ToolAnalyticsMiddleware(..., call_props=lambda tool, arguments: {"source": arguments["source"]})`
+adds props derived from each call. Keys and values must be short identifiers, the core props
+cannot be replaced, and a callable that raises or returns anything else costs only its props,
+never the event. Return identifiers, never argument text, and only props Mission Control
+accepts.
+
 In a server's tests, `beta_mcp_core.testing.assert_valid_envelope(answer, baseline=...)`
 checks each answer against the contract and against the answer the server gave before it
 adopted the envelope, and `assert_tool_surface(server, snapshot_path, max_chars=...)` keeps
