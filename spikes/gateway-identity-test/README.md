@@ -84,3 +84,28 @@ read from the installed package:
 
 Delete `spikes/gateway-identity-test/`. Nothing else in beta-mcp-core imports it, and it adds
 no dependency.
+
+## U5 tool-count sweep (26 Nov 2026)
+
+`tool_sweep.py` listed tools on the eleven fleet servers behind Access with the read-only `mcp-fleet-check` token; folk and folk-project were counted from source.
+
+| Server | Tools |
+|---|---|
+| scout | 6 |
+| atlas | 9 |
+| drop | 6 |
+| folio | 10 (only at `/folio`; `/mcp` returns Not Found) |
+| plans | 7 |
+| radar | 6 |
+| pulse | 8 |
+| poweroffice | 8 (only at `/poweroffice`; `/mcp` fails) |
+| beta-os | 8 |
+| gbfs | 10 |
+| gtfs | 18 |
+| folk | 12 |
+| folk-project | 12 |
+| **Total** | **120** |
+
+Longest namespaced name with a `<server>_` prefix: `beta_os_beta_os_get_assertion` (29 characters). Servers whose tools already carry their own prefix (`beta_os_`, `scout_`, `radar_`, `atlas_`) would repeat it; the build should strip a duplicate prefix.
+
+Side finding, outside this work: folio and poweroffice do not answer at `/mcp`, which the 2026-11-12 fleet consistency plan lists as done criterion 1.
