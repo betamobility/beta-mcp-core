@@ -93,7 +93,8 @@ class ToolAnalyticsMiddleware(Middleware):
     Mission Control accepts both props: it rejects an event with a prop it does not know.
 
     ``call_props`` takes the tool name and the call's arguments and returns extra props for
-    that call's event, for example ``{"source": "ssb"}``. Keys and values must be short
+    that call's event, for example ``{"source": "ssb"}`` after checking the argument against
+    the sources the server serves. Keys and values must be short
     identifiers, and the core props (``tool``, ``duration_band``, ``cache``,
     ``upstream_band``) cannot be replaced. If the callable raises or returns anything else,
     the event is still sent, without its props. Return only props Mission Control accepts,
