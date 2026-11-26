@@ -1,0 +1,32 @@
+name = "beta-auto-connect-test"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+# Required for Client ID Metadata Document (CIMD) support in @cloudflare/workers-oauth-provider.
+compatibility_flags = ["global_fetch_strictly_public"]
+workers_dev = false
+preview_urls = false
+
+[[routes]]
+pattern = "mcp-auto-connect-test.betamobility.ai"
+custom_domain = true
+
+[observability]
+enabled = true
+
+# TODO(deploy): create with `env -u CLOUDFLARE_API_TOKEN npx wrangler kv namespace create OAUTH_KV`
+# and replace the placeholder id below. The placeholder is only good for local tests.
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "TODO_REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Public values only. GOOGLE_CLIENT_SECRET is a secret: set it with
+# `env -u CLOUDFLARE_API_TOKEN npx wrangler secret put GOOGLE_CLIENT_SECRET`, never in this file.
+[vars]
+ALLOWED_DOMAIN = "betamobility.io"
+# TODO(deploy): Beta's Claude issuer URL, shown in Organization settings > Connectors >
+# (the connector) > Authentication > Auto-connect > Set up > Claude-issued. Copy it exactly,
+# path included: https://identity.anthropic.com/issuers/<issuer-id>
+CLAUDE_ISSUER = "https://identity.anthropic.com/issuers/TODO_REPLACE_WITH_ISSUER_ID"
+# TODO(deploy): the Google OAuth web client id (not secret). Redirect URI to register at Google:
+# https://mcp-auto-connect-test.betamobility.ai/auth/callback
+GOOGLE_CLIENT_ID = "TODO_REPLACE_WITH_GOOGLE_CLIENT_ID"
