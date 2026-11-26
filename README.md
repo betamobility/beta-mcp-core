@@ -80,7 +80,7 @@ not generate tool-use events.
 from beta_mcp_core.analytics import ToolAnalyticsMiddleware
 
 analytics = ToolAnalyticsMiddleware(
-    component_id="ssb-mcp",  # fixed registered app identifier
+    component_id="public-data-mcp",  # fixed registered app identifier
     ingest_url=settings.mc_analytics_url,  # HTTPS /analytics/event endpoint
     ingest_token=settings.mc_analytics_token,
     enabled=settings.analytics_enabled,
