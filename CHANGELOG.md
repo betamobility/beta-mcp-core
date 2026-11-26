@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.0
+
+- `ToolAnalyticsMiddleware(call_props=...)` adds props derived from each tool call. The
+  callable gets the tool name and the call's arguments and returns a small dict of short
+  identifiers, for example `{"source": "ssb"}` for a server that serves several sources.
+  It cannot replace the core props. If it raises or returns anything else, the event is
+  still sent, without its props. Off by default, so events are unchanged until a server
+  opts in, and Mission Control must accept a prop before a server sends it.
+
 ## v0.6.1
 
 - Remove an unreachable copy of the old cut loop left after `fit()`'s final return in

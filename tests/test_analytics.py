@@ -477,3 +477,99 @@ def test_every_emittable_value_is_one_mission_control_accepts():
         finally:
             _call_stats.reset(token)
         assert (holder.cache or "none") in MC_CACHE
+
+
+def props_server(receive, **kwargs):
+    sender = httpx.AsyncClient(transport=httpx.MockTransport(receive))
+    analytics = ToolAnalyticsMiddleware(
+        component_id="test-mcp", ingest_url="https://mc.example/analytics/event",
+        ingest_token="private-token", enabled=True, environment="production",
+        client=sender, **kwargs,
+    )
+    server = FastMCP("test", middleware=[analytics])
+
+    @server.tool
+    def data(source: str, secret: str = "") -> str:
+        return f"{source}:{secret}"
+
+    return server, analytics, sender
+
+
+async def test_without_a_props_callback_events_are_unchanged():
+    payloads, receive = collector()
+    server, analytics, sender = props_server(receive)
+    async with sender, Client(server) as client:
+        await client.call_tool("data", {"source": "ssb"})
+        await analytics.drain()
+    assert set(payloads[0]["props"]) == {"tool", "duration_band"}
+
+
+async def test_a_props_callback_adds_its_props_from_the_call_arguments():
+    payloads, receive = collector()
+    seen = []
+
+    def call_props(tool, arguments):
+        seen.append((tool, dict(arguments)))
+        return {"source": arguments["source"]}
+
+    server, analytics, sender = props_server(receive, call_props=call_props)
+    async with sender, Client(server) as client:
+        await client.call_tool("data", {"source": "ssb", "secret": "private text"})
+        await analytics.drain()
+    assert seen == [("data", {"source": "ssb", "secret": "private text"})]
+    props = payloads[0]["props"]
+    assert props["source"] == "ssb"
+    assert props["tool"] == "data"
+    assert "private" not in json.dumps(payloads[0])
+
+
+async def test_a_failing_props_callback_still_sends_the_event_without_its_props(caplog):
+    payloads, receive = collector()
+
+    def call_props(tool, arguments):
+        raise RuntimeError("private failure detail")
+
+    server, analytics, sender = props_server(receive, call_props=call_props)
+    async with sender, Client(server) as client:
+        result = await client.call_tool("data", {"source": "ssb"})
+        assert result.data == "ssb:"
+        await analytics.drain()
+    assert len(payloads) == 1
+    assert set(payloads[0]["props"]) == {"tool", "duration_band"}
+    assert "analytics props callback failed" in caplog.text
+    assert "private" not in caplog.text
+
+
+@pytest.mark.parametrize("returned", [
+    {"source": "free text with spaces"},
+    {"source": 3},
+    {"bad key!": "ssb"},
+    {"tool": "spoofed"},
+    {"duration_band": "lt_1s"},
+    ["source", "ssb"],
+    None,
+])
+async def test_props_that_are_not_short_identifiers_are_dropped(returned, caplog):
+    payloads, receive = collector()
+    server, analytics, sender = props_server(receive, call_props=lambda tool, args: returned)
+    async with sender, Client(server) as client:
+        await client.call_tool("data", {"source": "ssb"})
+        await analytics.drain()
+    assert len(payloads) == 1
+    assert payloads[0]["props"]["tool"] == "data"
+    assert set(payloads[0]["props"]) == {"tool", "duration_band"}
+
+
+async def test_a_props_callback_combines_with_cache_reporting():
+    payloads, receive = collector()
+    server, analytics, sender = props_server(
+        receive, call_props=lambda tool, args: {"source": args["source"]},
+        report_cache_and_upstream=True,
+    )
+    async with sender, Client(server) as client:
+        await client.call_tool("data", {"source": "dst"})
+        await analytics.drain()
+    assert payloads[0]["props"] == {
+        "tool": "data", "duration_band": payloads[0]["props"]["duration_band"],
+        "cache": "none", "source": "dst",
+    }
