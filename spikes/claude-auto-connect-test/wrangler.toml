@@ -26,7 +26,7 @@ ALLOWED_DOMAIN = "betamobility.io"
 # TODO(deploy): Beta's Claude issuer URL, shown in Organization settings > Connectors >
 # (the connector) > Authentication > Auto-connect > Set up > Claude-issued. Copy it exactly,
 # path included: https://identity.anthropic.com/issuers/<issuer-id>
-CLAUDE_ISSUER = "https://identity.anthropic.com/issuers/TODO_REPLACE_WITH_ISSUER_ID"
+CLAUDE_ISSUER = "https://identity.anthropic.com/issuers/iss_xtmd5654i5a5fl2ftgnhep"
 # TODO(deploy): the Google OAuth web client id (not secret). Redirect URI to register at Google:
 # https://mcp-auto-connect-test.betamobility.ai/auth/callback
 GOOGLE_CLIENT_ID = "TODO_REPLACE_WITH_GOOGLE_CLIENT_ID"
